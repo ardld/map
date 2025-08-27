@@ -1,7 +1,9 @@
 import { Dropbox } from "dropbox";
 import fetch from "node-fetch";
 import { exiftool } from "exiftool-vendored";
+import Jimp from "jimp";
 import fs from "fs/promises";
+import path from "path";
 
 // ====== CONFIG via env ======
 const DROPBOX_TOKEN = process.env.DROPBOX_TOKEN;
@@ -9,11 +11,15 @@ const SHARED_URL = process.env.DROPBOX_SHARED_URL;
 const DISABLE_EXIF = process.env.DISABLE_EXIF === "1";
 const ENABLE_FILENAME_GEOCODE = process.env.ENABLE_FILENAME_GEOCODE === "1";
 
+// Thumbnail settings
+const THUMB_MAX_WIDTH = parseInt(process.env.THUMB_MAX_WIDTH || "1024", 10);
+
 if (!DROPBOX_TOKEN) throw new Error("Missing env DROPBOX_TOKEN");
 if (!SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
 
 const OUTPUT_FILE = "public/photos.geojson";
 const OVERRIDES_FILE = "public/overrides.json";
+const THUMBS_DIR = "public/thumbs";
 
 const dbx = new Dropbox({ accessToken: DROPBOX_TOKEN, fetch });
 
@@ -23,25 +29,10 @@ function isImage(name = "") {
   return IMAGE_EXTS.some(ext => n.endsWith(ext));
 }
 
-function toRaw(sharedUrl) {
-  const u = new URL(sharedUrl);
-  u.searchParams.set("raw", "1");
-  u.searchParams.delete("dl");
-  return u.toString();
-}
-
-async function ensureSharedLink(pathLower) {
-  const list = await dbx.sharingListSharedLinks({ path: pathLower, direct_only: true });
-  const links = list.result?.links || [];
-  if (links.length) return toRaw(links[0].url);
-  const created = await dbx.sharingCreateSharedLinkWithSettings({ path: pathLower });
-  return toRaw(created.result.url);
-}
-
 async function downloadViaSharedLink(sharedFolderUrl, subpathLower) {
+  // Works for public shared-folder files; returns bytes
   const r = await dbx.sharingGetSharedLinkFile({ url: sharedFolderUrl, path: subpathLower });
-  const buf = Buffer.from(r.result.fileBinary, "binary");
-  return buf;
+  return Buffer.from(r.result.fileBinary, "binary");
 }
 
 async function getExifGPS(buf) {
@@ -119,11 +110,17 @@ async function listSharedTree(sharedUrl) {
 function baseNameNoExt(n = "") {
   return n.replace(/\.[^.]+$/, "").replace(/[_\-.]+/g, " ").trim();
 }
+function safeFileName(n = "") {
+  return n.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+}
 
 (async () => {
   console.log("Listing shared folder tree…");
   const entries = await listSharedTree(SHARED_URL);
   console.log(`Found ${entries.length} image files.`);
+
+  await fs.mkdir("public", { recursive: true });
+  await fs.mkdir(THUMBS_DIR, { recursive: true });
 
   const overrides = await loadOverrides();
 
@@ -134,6 +131,7 @@ function baseNameNoExt(n = "") {
     try {
       let lat = null, lon = null, when = null;
 
+      // Try Dropbox media_info first
       const media = f.media_info?.metadata;
       if (media?.location) {
         lat = media.location?.latitude ?? null;
@@ -141,19 +139,24 @@ function baseNameNoExt(n = "") {
         when = media.time_taken || null;
       }
 
+      // Download the file (we need it for EXIF and the thumbnail)
+      const buf = await downloadViaSharedLink(SHARED_URL, f.path_lower);
+
+      // EXIF fallback
       if (lat == null || lon == null) {
-        const buf = await downloadViaSharedLink(SHARED_URL, f.path_lower);
         const exif = await getExifGPS(buf);
         if (exif) {
           lat = exif.lat; lon = exif.lon; when = when || exif.when;
         }
       }
 
+      // Overrides
       const ov = overrides[f.path_display];
       if (ov && typeof ov.lat === "number" && typeof ov.lon === "number") {
         lat = ov.lat; lon = ov.lon;
       }
 
+      // Filename geocode as last resort
       if ((lat == null || lon == null) && ENABLE_FILENAME_GEOCODE) {
         const guess = await geocodeName(baseNameNoExt(f.name));
         if (guess) { lat = guess.lat; lon = guess.lon; }
@@ -164,14 +167,24 @@ function baseNameNoExt(n = "") {
         continue;
       }
 
-      const url = await ensureSharedLink(f.path_lower);
+      // Make a thumbnail and save it to /public/thumbs
+      const thumbName = safeFileName(f.name.replace(/\.[^.]+$/, "")) + ".jpg";
+      const thumbPath = path.join(THUMBS_DIR, thumbName);
+
+      const image = await Jimp.read(buf);
+      if (image.getWidth() > THUMB_MAX_WIDTH) {
+        image.resize({ w: THUMB_MAX_WIDTH });
+      }
+      await image.quality(82).writeAsync(thumbPath);
+
+      const publicUrl = `/thumbs/${thumbName}`;
 
       features.push({
         type: "Feature",
         properties: {
           title: f.name,
           dropbox_path: f.path_display,
-          url,
+          url: publicUrl,
           taken_at: when
         },
         geometry: { type: "Point", coordinates: [lon, lat] }
@@ -184,7 +197,6 @@ function baseNameNoExt(n = "") {
   }
 
   const geo = { type: "FeatureCollection", features };
-  await fs.mkdir("public", { recursive: true });
   await fs.writeFile(OUTPUT_FILE, JSON.stringify(geo, null, 2), "utf8");
   console.log(`Wrote ${features.length} features → ${OUTPUT_FILE} (skipped ${skipped})`);
 
