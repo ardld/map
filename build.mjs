@@ -107,7 +107,7 @@ async function fetchThumbViaSharedLink(sharedFolderUrl, subpathLower){
 async function fetchThumbViaId(fileId){
   const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
   const arg = {
-    resource: { ".tag":"path", "path": fileId },   // Dropbox accepts ids and paths here
+    resource: { ".tag":"path", "path": fileId },   // Dropbox accepts ids/paths here
     format:   { ".tag":"jpeg" },
     mode:     { ".tag":"fitone_bestfit" },
     size:     { ".tag":"w1024h768" }
@@ -125,7 +125,7 @@ async function fetchThumbViaId(fileId){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML (with: single InfoWindow, pagination, zoom cap, lightbox) === */
+/* === HTML (single InfoWindow, pagination, zoom cap, lightbox) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -195,7 +195,7 @@ async function initMap() {
   const lbImg = lb.querySelector('img');
   const lbClose = lb.querySelector('.close');
   lb.addEventListener('click', (e)=>{ if(e.target===lb || e.target===lbClose) { lb.style.display='none'; lbImg.src=''; }});
-  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') { lb.style.display='none'; lbImg.src=''; }});
+  document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') { lb.style.display='none'; lbImg.src=''; }});
 
   try {
     const res = await fetch('${dataUrl}?ts=' + Date.now());
@@ -322,7 +322,7 @@ async function initMap() {
       if ((lat==null || lon==null) && ENABLE_NOMINATIM) {
         const urlName = f.name.replace(/\.[^.]+$/,"").replace(/[_\-.]+/g," ").trim();
         try{
-          const u = \`https://nominatim.openstreetmap.org/search?q=\${encodeURIComponent(urlName)}&format=jsonv2&limit=1\`;
+          const u = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(urlName)}&format=jsonv2&limit=1`;
           const r = await fetch(u, { headers:{ "User-Agent":"RealRomania-PhotoMap/1.0" } });
           if (r.ok) {
             const d = await r.json();
@@ -355,7 +355,7 @@ async function initMap() {
         } catch {}
       }
 
-      // External raw fallback (used in lightbox and, if needed, as <img>)
+      // External raw fallback
       let thumbExternal = null;
       if (!thumbRel && rawUrl) { thumbExternal = rawUrl; extLinks++; }
 
@@ -368,7 +368,7 @@ async function initMap() {
           original_page: pageUrl,
           thumb: thumbRel,               // local thumbnail
           thumb_external: thumbExternal, // fallback for <img>
-          full_external: rawUrl          // always try to provide a bigger image for lightbox
+          full_external: rawUrl          // bigger image for lightbox
         },
         geometry: { type: "Point", coordinates: [lon, lat] }
       });
