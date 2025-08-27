@@ -75,4 +75,163 @@ function guessFromFilename(name = "") {
   const candidates = Object.keys(GAZ)
     .filter(k => text.includes(k))
     .sort((a, b) => b.length - a.length);
-  return candidates.length ? GAZ
+  return candidates.length ? GAZ[candidates[0]] : null;
+}
+
+async function geocodeNominatim(q) {
+  if (!ENABLE_NOMINATIN) return null;
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`;
+  const res = await fetch(url, { headers: { "User-Agent": "RealRomania-PhotoLocations/1.0" } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (Array.isArray(data) && data.length) {
+    return [parseFloat(data[0].lon), parseFloat(data[0].lat)];
+  }
+  return null;
+}
+
+async function listAll(sharedUrl) {
+  const shared_link = { url: sharedUrl };
+  const files = [];
+  const queue = [""];
+
+  while (queue.length) {
+    const folder = queue.shift();
+    let res = await dbx.filesListFolder({
+      path: folder,
+      shared_link,
+      include_media_info: true
+    });
+    let data = res.result;
+
+    for (const e of data.entries) {
+      if (e[".tag"] === "folder") queue.push(e.path_lower);
+      else if (e[".tag"] === "file" && isImage(e.name)) files.push(e);
+    }
+
+    while (data.has_more) {
+      const more = await dbx.filesListFolderContinue({ cursor: data.cursor });
+      const md = more.result;
+      for (const e of md.entries) {
+        if (e[".tag"] === "folder") queue.push(e.path_lower);
+        else if (e[".tag"] === "file" && isImage(e.name)) files.push(e);
+      }
+      data = md;
+    }
+  }
+  return files;
+}
+
+function htmlTemplate({ dataUrl }) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Photo Map • Proof</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  html, body, #map { height: 100%; margin: 0; }
+  .popup { width: 280px; }
+  .title { font: 600 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin-top: 6px; }
+  .meta { opacity:.7; font: 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  .leaflet-container { background: #f5f7f9; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+const map = L.map('map', { preferCanvas:true }).setView([45.94, 25.00], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18, attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+const clusters = L.markerClusterGroup({ disableClusteringAtZoom: 12 });
+
+fetch('${dataUrl}?ts=' + Date.now())
+  .then(r => r.json())
+  .then(geo => {
+    const markers = L.geoJSON(geo, {
+      pointToLayer: (feat, latlng) => L.marker(latlng),
+      onEachFeature: (feat, layer) => {
+        const p = feat.properties || {};
+        const html = '<div class="popup">'
+          + '<div class="title">' + (p.title || '') + '</div>'
+          + (p.taken_at ? '<div class="meta">' + p.taken_at + '</div>' : '')
+          + (p.source ? '<div class="meta">source: ' + p.source + '</div>' : '')
+          + '</div>';
+        layer.bindPopup(html, { maxWidth: 320 });
+      }
+    });
+    clusters.addLayer(markers);
+    map.addLayer(clusters);
+    try { const b = markers.getBounds(); if (b.isValid()) map.fitBounds(b.pad(0.15)); } catch(e){}
+  })
+  .catch(err => console.error('Failed to load locations.json', err));
+</script>
+</body>
+</html>`;
+}
+
+(async () => {
+  console.log("Listing Dropbox shared folder…");
+  const entries = await listAll(DROPBOX_SHARED_URL);
+  console.log(`Found ${entries.length} images.`);
+
+  let usedMedia = 0, usedGuess = 0, usedNom = 0, skipped = 0;
+  const features = [];
+
+  for (const f of entries) {
+    let lon = null, lat = null, when = null, source = null;
+
+    // 1) Dropbox media_info
+    const media = f.media_info?.metadata;
+    if (media?.location) {
+      lat = media.location?.latitude ?? null;
+      lon = media.location?.longitude ?? null;
+      when = media.time_taken || null;
+      if (lat != null && lon != null) { usedMedia++; source = "media_info"; }
+    }
+
+    // 2) Filename gazetteer
+    if (lat == null || lon == null) {
+      const g = guessFromFilename(f.name);
+      if (g) { [lon, lat] = g; usedGuess++; source = "filename"; }
+    }
+
+    // 3) Optional Nominatim (explicit opt-in)
+    if ((lat == null || lon == null) && ENABLE_NOMINATIN) {
+      const name = f.name.replace(/\.[^.]+$/, "").replace(/[_\-.]+/g, " ").trim();
+      const g = await geocodeNominatim(name);
+      if (g) { [lon, lat] = g; usedNom++; source = "nominatim"; }
+    }
+
+    if (lat == null || lon == null) { skipped++; continue; }
+
+    features.push({
+      type: "Feature",
+      properties: { title: f.name, path: f.path_display, taken_at: when, source },
+      geometry: { type: "Point", coordinates: [lon, lat] }
+    });
+  }
+
+  const geo = { type: "FeatureCollection", features };
+
+  await fs.mkdir("public", { recursive: true });
+  await fs.writeFile("public/locations.json", JSON.stringify(geo, null, 2), "utf8");
+
+  // Write the proof page that consumes locations.json
+  const html = htmlTemplate({ dataUrl: "locations.json" });
+  await fs.writeFile("public/index.html", html, "utf8");
+  await fs.writeFile("public/200.html", html, "utf8"); // handy fallback
+
+  console.log(`Wrote ${features.length} features → public/locations.json`);
+  console.log(`  via media_info: ${usedMedia}`);
+  console.log(`  via filename gazetteer: ${usedGuess}`);
+  if (ENABLE_NOMINATIN) console.log(`  via Nominatim: ${usedNom}`);
+  console.log(`  skipped (no coords): ${skipped}`);
+})().catch(e => { console.error(e); process.exit(1); });
