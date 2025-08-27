@@ -2,7 +2,7 @@
 // - pulls Dropbox shared folder, extracts GPS (EXIF) or guesses from filename
 // - writes site/locations.json + site/thumbs/*
 // - writes site/index.html (Google Maps; centered on Romania)
-// env needed at build-time: DROPBOX_* + GMAPS_API_KEY
+// Env vars at build-time: DROPBOX_* + GMAPS_API_KEY
 
 import { Dropbox } from "dropbox";
 import fs from "fs/promises";
@@ -11,8 +11,8 @@ import fetch from "node-fetch";
 import crypto from "node:crypto";
 
 /* === Config (env) === */
-const RAW_TOKEN       = process.env.DROPBOX_TOKEN;            // optional (may expire)
-const REFRESH         = process.env.DROPBOX_REFRESH_TOKEN;     // recommended (long-lived)
+const RAW_TOKEN       = process.env.DROPBOX_TOKEN;            // optional (short-lived)
+const REFRESH         = process.env.DROPBOX_REFRESH_TOKEN;     // recommended (long-lived via refresh)
 const APP_KEY         = process.env.DROPBOX_APP_KEY;
 const APP_SECRET      = process.env.DROPBOX_APP_SECRET;
 const SHARED_URL      = process.env.DROPBOX_SHARED_URL;        // REQUIRED (shared folder link)
@@ -112,7 +112,7 @@ async function reverseGeocode(lat, lng){
   return info;
 }
 
-/* Fallback text in EN (used only if no override in content.json) */
+/* Fallback EN text (used only if no override in content.json) */
 function makeBlurb(niceTitle, components) {
   const area = components?.county || components?.state || "Romania";
   return `${niceTitle} is a photogenic stop in ${area}. Take a short walk, find a view, and let it fold into your itinerary.`;
@@ -293,9 +293,9 @@ function htmlTemplate({ dataUrl, apiKey }){
 </div>
 
 <script>
-const DATA_URL = '${dataUrl}?ts=' + Date.now();
+const DATA_URL = 'locations.json?ts=' + Date.now();
 
-// small helper to toggle dropbox raw/dl param when an image fails
+// toggle dropbox param when an image fails
 function toggleDropboxParam(u){
   try{
     const url = new URL(u);
@@ -475,6 +475,7 @@ function buildTOC(groups) {
 }
 
 window.initMap = async function initMap() {
+  // left panel & lightbox wiring
   left.toc = document.getElementById('toc');
   left.explain = document.getElementById('explain');
   left.lightbox = document.getElementById('lightbox');
@@ -496,8 +497,9 @@ window.initMap = async function initMap() {
     }
   });
 
+  // Google Map
   map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 45.9432, lng: 24.9668 }, // Romania center
+    center: { lat: 45.9432, lng: 24.9668 }, // Romania
     zoom: 6,
     mapTypeControl: false,
     streetViewControl: false,
@@ -505,6 +507,7 @@ window.initMap = async function initMap() {
   });
   info = new google.maps.InfoWindow();
 
+  // data
   try {
     const res = await fetch(DATA_URL);
     const geo = await res.json();
@@ -519,7 +522,7 @@ window.initMap = async function initMap() {
     }
     markers.forEach(m=>m.setMap(map));
 
-    // fixed center/zoom stays (no auto-fit)
+    // fixed center/zoom; no auto-fit
     buildTOC(groups);
   } catch (e) {
     console.error('Failed to load data', e);
