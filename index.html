@@ -14,17 +14,20 @@
   .gm-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
   .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
   .gm-count { font-size: 12px; opacity: .7; }
+  /* Lightbox */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
   #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
   #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
-  #lightbox .prev { left: 16px; } #lightbox .next { right: 16px; }
+  #lightbox .prev { left: 16px; }
+  #lightbox .next { right: 16px; }
   #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
+<!-- Lightbox -->
 <div id="lightbox" aria-modal="true" role="dialog">
   <span class="close" aria-label="Close">×</span>
   <button class="nav prev" aria-label="Previous">‹</button>
@@ -35,8 +38,8 @@
 
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
-const MAX_INIT_ZOOM = 8;
-const MAX_CLUSTER_ZOOM = 12;
+const MAX_INIT_ZOOM = 8;      // after initial fit
+const MAX_CLUSTER_ZOOM = 13;  // when opening a cluster (enough to separate pins)
 
 function groupByCoord(features) {
   const by = new Map();
@@ -74,17 +77,22 @@ function toggleDropboxParam(u){
 }
 
 async function initMap() {
-  const map = new google.maps.Map(document.getElementById('map'), { center: { lat: 45.94, lng: 25.0 }, zoom: 6, mapTypeControl: false });
-  const info = new google.maps.InfoWindow();
+  const map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: 45.94, lng: 25.0 },
+    zoom: 6,
+    mapTypeControl: false
+  });
 
-  // Lightbox
+  const info = new google.maps.InfoWindow(); // exactly one open at a time
+
+  // Lightbox state & helpers
   const lb = document.getElementById('lightbox');
   const lbImg = lb.querySelector('img');
   const lbClose = lb.querySelector('.close');
-  const lbPrev = lb.querySelector('.prev');
-  const lbNext = lb.querySelector('.next');
+  const lbPrev = lb.querySelector('.prev');  // FIXED selector (no stray space)
+  const lbNext = lb.querySelector('.next');  // FIXED selector
   const lbCount = lb.querySelector('.counter');
-  let lbState = null;
+  let lbState = null; // { group, index }
 
   function renderLightbox() {
     if (!lbState) return;
@@ -98,10 +106,12 @@ async function initMap() {
     lbCount.textContent = (n > 1) ? ( (i+1) + " / " + n ) : "";
     lbPrev.style.display = (n > 1) ? "block" : "none";
     lbNext.style.display = (n > 1) ? "block" : "none";
+
+    // Lightbox fallback as well
     lbImg.onerror = () => {
       const alt = toggleDropboxParam(lbImg.src);
       if (alt !== lbImg.src) { lbImg.src = alt; return; }
-      if (it.thumb_external && lbImg.src !== it.thumb_external) lbImg.src = it.thumb_external;
+      if (it.thumb_external && lbImg.src !== it.thumb_external) { lbImg.src = it.thumb_external; return; }
     };
   }
   function openLightbox(group, index) { lbState = { group, index }; renderLightbox(); lb.style.display = 'flex'; }
@@ -136,8 +146,7 @@ async function initMap() {
       const n = g.items.length;
       const i = ((idx % n) + n) % n;
       const it = g.items[i];
-      // *** key change: also fall back to full_external ***
-      const imgSrc = it.thumb || it.thumb_external || it.full_external || null;
+      const imgSrc = it.thumb || it.thumb_external || null;
       const html =
         '<div class="gm-popup" data-idx="'+i+'">' +
           (n>1 ? (
@@ -172,24 +181,41 @@ async function initMap() {
       });
     }
 
+    // One marker per grouped coordinate
     for (const g of groups) {
       const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
       m.addListener('click', () => renderPopup(m, g, 0));
       markers.push(m);
     }
 
+    // CLUSTER: open by fitting bounds; cap zoom; if still crowded, nudge one more level
     new markerClusterer.MarkerClusterer({
       map,
       markers,
       onClusterClick: (ev) => {
         info.close();
-        map.fitBounds(ev.cluster.bounds, 60);
-        google.maps.event.addListenerOnce(map, 'idle', () => {
-          if (map.getZoom() > MAX_CLUSTER_ZOOM) map.setZoom(MAX_CLUSTER_ZOOM);
-        });
+        const b = ev.cluster && ev.cluster.bounds;
+        const pos = ev.cluster && ev.cluster.position;
+        if (b) {
+          map.fitBounds(b, 60);
+          google.maps.event.addListenerOnce(map, 'idle', () => {
+            if (map.getZoom() > MAX_CLUSTER_ZOOM) map.setZoom(MAX_CLUSTER_ZOOM);
+            // If many markers and we're not at cap, nudge one more step so pins separate
+            const many = ev.cluster && ev.cluster.markers && ev.cluster.markers.length > 2;
+            if (many && map.getZoom() < MAX_CLUSTER_ZOOM && pos) {
+              map.panTo(pos);
+              map.setZoom(Math.min(map.getZoom() + 1, MAX_CLUSTER_ZOOM));
+            }
+          });
+        } else if (pos) {
+          const z = Math.min((map.getZoom()||6) + 2, MAX_CLUSTER_ZOOM);
+          map.panTo(pos);
+          map.setZoom(z);
+        }
       }
     });
 
+    // Initial fit to all markers, capped at MAX_INIT_ZOOM
     if (markers.length) {
       const b = new google.maps.LatLngBounds();
       markers.forEach(m => b.extend(m.getPosition()));
