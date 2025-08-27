@@ -11,6 +11,7 @@
   "dependencies": {
     "dropbox": "^10.34.0",
     "exiftool-vendored": "^28.3.0",
+    "jimp": "^0.22.12",
     "node-fetch": "^3.3.2"
   }
 }
