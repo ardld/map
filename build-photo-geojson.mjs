@@ -5,13 +5,11 @@ import Jimp from "jimp";
 import fs from "fs/promises";
 import path from "path";
 
-// ====== CONFIG via env ======
+// ===== Env/config =====
 const DROPBOX_TOKEN = process.env.DROPBOX_TOKEN;
 const SHARED_URL = process.env.DROPBOX_SHARED_URL;
 const DISABLE_EXIF = process.env.DISABLE_EXIF === "1";
 const ENABLE_FILENAME_GEOCODE = process.env.ENABLE_FILENAME_GEOCODE === "1";
-
-// Thumbnail settings
 const THUMB_MAX_WIDTH = parseInt(process.env.THUMB_MAX_WIDTH || "1024", 10);
 
 if (!DROPBOX_TOKEN) throw new Error("Missing env DROPBOX_TOKEN");
@@ -29,10 +27,26 @@ function isImage(name = "") {
   return IMAGE_EXTS.some(ext => n.endsWith(ext));
 }
 
-async function downloadViaSharedLink(sharedFolderUrl, subpathLower) {
-  // Works for public shared-folder files; returns bytes
-  const r = await dbx.sharingGetSharedLinkFile({ url: sharedFolderUrl, path: subpathLower });
-  return Buffer.from(r.result.fileBinary, "binary");
+function toRaw(u) {
+  const url = new URL(u);
+  url.searchParams.set("raw", "1");  // forces file bytes
+  url.searchParams.delete("dl");
+  return url.toString();
+}
+
+async function getPerFileSharedLink(sharedFolderUrl, subpathLower) {
+  // Ask Dropbox to give us the file-level link relative to the folder shared link
+  const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
+  const link = meta.result?.url;
+  if (!link) throw new Error("No per-file shared link returned");
+  return toRaw(link);
+}
+
+async function fetchBytes(rawUrl) {
+  const res = await fetch(rawUrl, { redirect: "follow" });
+  if (!res.ok) throw new Error(`fetch ${res.status}`);
+  const ab = await res.arrayBuffer();
+  return Buffer.from(ab);
 }
 
 async function getExifGPS(buf) {
@@ -131,7 +145,7 @@ function safeFileName(n = "") {
     try {
       let lat = null, lon = null, when = null;
 
-      // Try Dropbox media_info first
+      // Use Dropbox's own parsed media_info when present
       const media = f.media_info?.metadata;
       if (media?.location) {
         lat = media.location?.latitude ?? null;
@@ -139,10 +153,11 @@ function safeFileName(n = "") {
         when = media.time_taken || null;
       }
 
-      // Download the file (we need it for EXIF and the thumbnail)
-      const buf = await downloadViaSharedLink(SHARED_URL, f.path_lower);
+      // Get a public per-file link and download bytes from there
+      const rawUrl = await getPerFileSharedLink(SHARED_URL, f.path_lower);
+      const buf = await fetchBytes(rawUrl);
 
-      // EXIF fallback
+      // EXIF fallback for GPS/time
       if (lat == null || lon == null) {
         const exif = await getExifGPS(buf);
         if (exif) {
@@ -150,13 +165,13 @@ function safeFileName(n = "") {
         }
       }
 
-      // Overrides
+      // Manual overrides
       const ov = overrides[f.path_display];
       if (ov && typeof ov.lat === "number" && typeof ov.lon === "number") {
         lat = ov.lat; lon = ov.lon;
       }
 
-      // Filename geocode as last resort
+      // Last-ditch filename geocode
       if ((lat == null || lon == null) && ENABLE_FILENAME_GEOCODE) {
         const guess = await geocodeName(baseNameNoExt(f.name));
         if (guess) { lat = guess.lat; lon = guess.lon; }
@@ -167,7 +182,7 @@ function safeFileName(n = "") {
         continue;
       }
 
-      // Make a thumbnail and save it to /public/thumbs
+      // Make a thumbnail to serve from Vercel (fast popups, no hotlinking)
       const thumbName = safeFileName(f.name.replace(/\.[^.]+$/, "")) + ".jpg";
       const thumbPath = path.join(THUMBS_DIR, thumbName);
 
@@ -177,14 +192,13 @@ function safeFileName(n = "") {
       }
       await image.quality(82).writeAsync(thumbPath);
 
-      const publicUrl = `/thumbs/${thumbName}`;
-
       features.push({
         type: "Feature",
         properties: {
           title: f.name,
           dropbox_path: f.path_display,
-          url: publicUrl,
+          url: `/thumbs/${thumbName}`,      // served by Vercel
+          original: rawUrl,                  // optional: original Dropbox link
           taken_at: when
         },
         geometry: { type: "Point", coordinates: [lon, lat] }
