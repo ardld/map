@@ -63,8 +63,9 @@ const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f
 const md5  = s => crypto.createHash("md5").update(s).digest("hex");
 const esc  = s => String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const baseKey = name => name.toLowerCase().replace(/\.[^.]+$/,'').trim();
 
-/* Tiny RO gazetteer [lon,lat] for filename guesses */
+/* Tiny RO gazetteer [lon,lat] for filename guesses (fallbacks) */
 const GAZ = {
   "breb":[23.9049,47.7485],"barsana":[24.0425,47.7367],"bethlen cris":[24.671,46.1932],
   "cris":[24.671,46.1932],"brateiu":[24.3826,46.1491],"bistrita":[24.5,47.133],
@@ -84,6 +85,70 @@ const guessFromFilename = (name="") => {
   const keys = Object.keys(GAZ).filter(k=>t.includes(k)).sort((a,b)=>b.length-a.length);
   return keys.length ? GAZ[keys[0]] : null;
 };
+
+/* === Optional reverse geocoding === */
+const geoCache = new Map(); // "lat,lng" -> { niceTitle, components }
+async function reverseGeocode(lat, lng){
+  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  if (geoCache.has(key)) return geoCache.get(key);
+  if (!ENABLE_NOMINATIM) { geoCache.set(key,null); return null; }
+
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lng));
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("zoom", "14");
+  if (NOMINATIM_EMAIL) url.searchParams.set("email", NOMINATIM_EMAIL);
+
+  await sleep(NOMI_THROTTLE);
+  const r = await fetch(url.toString(), { headers: { "User-Agent":"RealRomania-PhotoMap/1.0 (+github-pages)" }});
+  if (!r.ok) { geoCache.set(key,null); return null; }
+  const j = await r.json().catch(()=>null);
+  if (!j) { geoCache.set(key,null); return null; }
+
+  const addr = j.address || {};
+  const name = j.name || addr.tourism || addr.historic || addr.natural || addr.village || addr.town || addr.city || "Romania";
+  const county = addr.county || addr.state || "";
+  const niceTitle = county ? `${name}, ${county}` : name;
+  const info = { niceTitle, components: addr };
+  geoCache.set(key, info);
+  return info;
+}
+
+/* === Tourism copy generator (fallback if no overrides) === */
+function makeBlurb(niceTitle, components) {
+  const area = components?.county || components?.state || "Romania";
+  return `${niceTitle} is a photogenic stop in ${area}. Come for a short wander, a view, and a sense of place—easy to fold into any Romania itinerary.`;
+}
+function titleFromFilename(name) {
+  const base = name.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').trim();
+  const words = base.split(/\s+/).map(w=>w[0]?w[0].toUpperCase()+w.slice(1):w);
+  return words.join(' ');
+}
+
+/* === Read research overrides (cuprins) if present ===
+   content.json format (array):
+   [
+     { "filename": "Feldioara.jpg", "title": "Feldioara Fortress, Brașov County", "description": "..." },
+     { "filename": "Breb MM clopuri.jpg", "title": "Breb, Maramureș – Wooden Gates & Traditions", "description": "..." }
+   ]
+*/
+async function loadOverrides() {
+  try {
+    const txt = await fs.readFile("content.json","utf8");
+    const arr = JSON.parse(txt);
+    const map = new Map();
+    for (const it of arr) {
+      if (!it || !it.filename) continue;
+      map.set(baseKey(it.filename), { title: String(it.title||""), description: String(it.description||"") });
+    }
+    console.log(`Loaded ${map.size} content overrides from content.json`);
+    return map;
+  } catch {
+    console.log("No content.json found; using auto-generated titles/descriptions.");
+    return new Map();
+  }
+}
 
 /* === Dropbox list === */
 async function listAll(dbx){
@@ -163,96 +228,41 @@ async function fetchThumbViaIdOrPath(dbx, idOrPath){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === Optional reverse geocoding (once per lat,lng) === */
-const geoCache = new Map(); // key "lat,lng" -> { titleParts, niceTitle }
-async function reverseGeocode(lat, lng){
-  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-  if (geoCache.has(key)) return geoCache.get(key);
-
-  if (!ENABLE_NOMINATIM) { geoCache.set(key,null); return null; }
-
-  const url = new URL("https://nominatim.openstreetmap.org/reverse");
-  url.searchParams.set("lat", String(lat));
-  url.searchParams.set("lon", String(lng));
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("zoom", "14");
-  if (NOMINATIM_EMAIL) url.searchParams.set("email", NOMINATIM_EMAIL);
-
-  await sleep(NOMI_THROTTLE); // be nice to the service
-  const r = await fetch(url.toString(), {
-    headers: { "User-Agent": "RealRomania-PhotoMap/1.0 (+github-pages)" }
-  });
-  if (!r.ok) { geoCache.set(key,null); return null; }
-  const j = await r.json().catch(()=>null);
-  if (!j) { geoCache.set(key,null); return null; }
-
-  const addr = j.address || {};
-  const name =
-    j.name ||
-    addr.tourism || addr.historic || addr.leisure || addr.natural ||
-    addr.village || addr.town || addr.city || addr.suburb || addr.hamlet ||
-    addr.county || addr.state || "Romania";
-
-  const county = addr.county || "";
-  const state  = addr.state  || "";
-  const country= addr.country || "Romania";
-
-  // Prefer "Name, County" or "Name, State"
-  const niceTitle = county && name ? `${name}, ${county}` :
-                    state  && name ? `${name}, ${state}`  :
-                    `${name}, ${country}`;
-
-  const info = { niceTitle, components: addr, display_name: j.display_name || "" };
-  geoCache.set(key, info);
-  return info;
-}
-
-/* === Tourism copy generator (short & neutral) === */
-function makeBlurb(niceTitle, components) {
-  const area = components?.county || components?.state || "Romania";
-  return `${niceTitle} is a photogenic spot in ${area}, where travelers can pause for views and local color. It’s an easy add to a Romania itinerary—come for a stroll, a photo, and a dose of atmosphere.`;
-}
-function titleFromFilename(name) {
-  const base = name.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').trim();
-  const words = base.split(/\s+/).map(w=>w[0]?w[0].toUpperCase()+w.slice(1):w);
-  return words.join(' ');
-}
-
-/* === HTML template: two-column layout (left TOC + explanation, right map), NO CLUSTERS === */
+/* === HTML (light theme, left TOC shows cuprins titles, left explanation shows DESCRIPTION FIRST) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Photo Map • Real Romania</title>
+<title>Real Romania • Photo Map</title>
 <style>
-  :root { --left: 380px; --bg:#0b0b0c; --panel:#111317; --text:#eaeef6; --muted:#9aa4b2; }
+  :root { --left: 380px; --bg:#ffffff; --panel:#f6f7f9; --text:#111; --muted:#5a6b7b; --border:#e7eaef; --accent:#2f6fed; }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin:0; background:var(--bg); color:var(--text); font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  html, body { height: 100%; margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   #wrap { display: grid; grid-template-columns: var(--left) 1fr; height: 100%; }
-  #left { background: var(--panel); border-right: 1px solid #22252b; display:flex; flex-direction:column; min-width:0; }
-  #brand { padding: 12px 14px; border-bottom:1px solid #22252b; font-weight:600; letter-spacing:.2px; }
-  #toc { padding: 10px 8px; overflow:auto; flex: 1 1 auto; }
-  .toc-item { padding: 6px 8px; border-radius: 8px; cursor: pointer; display:flex; align-items:center; gap:8px; }
-  .toc-item:hover { background:#1a1e25; }
-  .toc-item.active { background:#1f2630; }
-  .dot { width:8px; height:8px; border-radius:50%; background:#6aa3ff; opacity:.8; }
-  .toc-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #left { background: var(--panel); border-right: 1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
+  #brand { padding: 12px 14px; border-bottom:1px solid var(--border); font-weight:650; letter-spacing:.2px; }
+  #toc { padding: 8px; overflow:auto; flex: 1 1 auto; }
+  .toc-item { padding: 8px 10px; border-radius: 10px; cursor: pointer; display:flex; align-items:center; gap:10px; border:1px solid transparent; }
+  .toc-item:hover { background:#eef3ff; border-color:#dde7ff; }
+  .toc-item.active { background:#e9efff; border-color:#d6e3ff; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); opacity:.85; }
+  .toc-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
   .toc-count { margin-left:auto; color:var(--muted); font-size:12px; }
-  #explain { padding: 12px 14px; border-top:1px solid #22252b; }
-  #explain h3 { margin: 0 0 6px 0; font-size: 16px; }
+  #explain { padding: 14px; border-top:1px solid var(--border); }
+  #explain h3 { margin: 6px 0 0 0; font-size: 16px; }
   #explain p { margin: 0 0 8px 0; color: var(--muted); }
-  #explain .thumb { width: 100%; border-radius:10px; margin-top:8px; display:block; }
+  #explain .thumb { width: 100%; border-radius:12px; margin-top:10px; display:block; border:1px solid var(--border); }
   #map { width: 100%; height: 100%; }
-  /* InfoWindow content */
-  .gm-popup { max-width: 360px; color:#111; }
-  .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:8px; }
+  /* InfoWindow (on map) */
+  .gm-popup { max-width: 360px; }
+  .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:10px; }
   .gm-pager { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
-  .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
-  .gm-count { font-size: 12px; opacity: .7; }
-  .gm-title { font-weight:600; margin:6px 0 2px 0; }
-  .gm-meta { opacity:.7; font-size:12px; }
+  .gm-btn { border: 1px solid #cdd5df; background: #fff; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  .gm-count { font-size: 12px; color:#5a6b7b; }
+  .gm-title { font-weight:650; margin:6px 0 2px 0; }
+  .gm-meta { color:#6b7a88; font-size:12px; }
   /* Lightbox */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
@@ -260,17 +270,16 @@ function htmlTemplate({ dataUrl, apiKey }){
   #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
   #lightbox .prev { left: 16px; } .#lightbox .next { right: 16px; }
   #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
-  a.inline { color:#9bc2ff; text-decoration:none; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="left">
-    <div id="brand">Real Romania • Photo Map</div>
+    <div id="brand">Real Romania • Cuprins</div>
     <div id="toc" role="navigation" aria-label="Places"></div>
     <div id="explain">
-      <h3>Select a place on the left or a pin on the map</h3>
-      <p>When you pick a place, you’ll see a short travel blurb here and a thumbnail. Click the image for a larger view.</p>
+      <p>Selectează un loc din stânga sau un pin pe hartă.</p>
+      <h3>&nbsp;</h3>
     </div>
   </div>
   <div id="map"></div>
@@ -287,7 +296,6 @@ function htmlTemplate({ dataUrl, apiKey }){
 
 <script>
 const DATA_URL = '${dataUrl}?ts=' + Date.now();
-const GMAPS_KEY = '${apiKey}';
 </script>
 <script src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap" defer async></script>
 <script>
@@ -302,7 +310,9 @@ function groupByCoord(features) {
     const item = {
       title: p.title || "",
       place_title: p.place_title || p.title || "",
+      cuprins_title: p.cuprins_title || "",
       blurb: p.blurb || "",
+      cuprins_desc: p.cuprins_desc || "",
       taken_at: p.taken_at || "",
       thumb: p.thumb || null,
       thumb_external: p.thumb_external || null,
@@ -312,14 +322,19 @@ function groupByCoord(features) {
     if (!by.has(key)) by.set(key, { lat, lng, items: [item] });
     else by.get(key).items.push(item);
   }
-  // derive group title = most frequent place_title in group
+  // prefer cuprins_title for group title
   return Array.from(by.values()).map(g=>{
-    const freq = new Map();
-    for (const it of g.items) freq.set(it.place_title, (freq.get(it.place_title)||0)+1);
-    let bestTitle = "Untitled";
-    let bestCount = -1;
-    for (const [t,c] of freq) if (c>bestCount) { bestTitle=t; bestCount=c; }
-    g.title = bestTitle;
+    const pick = (get) => {
+      const freq = new Map();
+      for (const it of g.items) {
+        const t = get(it) || "";
+        freq.set(t, (freq.get(t)||0)+1);
+      }
+      let best = ""; let bestCount = -1;
+      for (const [t,c] of freq) if (t && c>bestCount) { best=t; bestCount=c; }
+      return best;
+    };
+    g.title = pick(it=>it.cuprins_title) || pick(it=>it.place_title) || "Loc";
     return g;
   });
 }
@@ -364,13 +379,17 @@ function renderExplain(group, idx){
   const it = group.items[currentIndex];
   const ex = left.explain;
   ex.innerHTML = "";
-  const h = document.createElement('h3'); h.textContent = it.place_title || it.title || 'Photo';
-  const p = document.createElement('p');  p.textContent = it.blurb || '';
-  ex.appendChild(h); ex.appendChild(p);
+
+  // DESCRIPTION FIRST
+  const p = document.createElement('p');  p.textContent = it.cuprins_desc || it.blurb || '';
+  const h = document.createElement('h3'); h.textContent = it.cuprins_title || it.place_title || it.title || 'Foto';
+
+  ex.appendChild(p);
+  ex.appendChild(h);
 
   const imgSrc = it.thumb || it.thumb_external || it.full_external;
   if (imgSrc) {
-    const a = document.createElement('a'); a.href="#"; a.className="inline";
+    const a = document.createElement('a'); a.href="#";
     const img = document.createElement('img'); img.className="thumb"; img.alt=it.title||"";
     img.src = imgSrc; attachImgFallback(img, it);
     a.appendChild(img);
@@ -420,7 +439,7 @@ function renderPopup(marker, group, idx) {
                      '<img loading="lazy" class="gm-img" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
                    '</a>' +
                  '</div>') : '') +
-      '<div class="gm-title">'+(it.title||'')+'</div>' +
+      '<div class="gm-title">'+(it.cuprins_title || it.place_title || it.title || '')+'</div>' +
       (it.taken_at ? '<div class="gm-meta">'+it.taken_at+'</div>' : '') +
     '</div>';
 
@@ -433,14 +452,7 @@ function renderPopup(marker, group, idx) {
     const link = document.querySelector('.imglink');
     const img  = document.querySelector('.gm-img');
 
-    if (img) {
-      img.onerror = ()=> {
-        const alt = toggleDropboxParam(img.src);
-        if (alt !== img.src) { img.src = alt; return; }
-        if (it.full_external && img.src !== it.full_external) { img.src = it.full_external; return; }
-        if (it.thumb_external && img.src !== it.thumb_external) { img.src = it.thumb_external; return; }
-      };
-    }
+    if (img) attachImgFallback(img, it);
     if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, group, i-1); renderExplain(group, i-1); };
     if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, group, i+1); renderExplain(group, i+1); };
     if (link) link.onclick = (e)=>{ e.preventDefault(); openLightbox(group, i); };
@@ -455,8 +467,8 @@ function buildTOC(groups) {
     const item = document.createElement('div');
     item.className = 'toc-item';
     const dot = document.createElement('div'); dot.className = 'dot';
-    const title = document.createElement('div'); title.className = 'toc-title'; title.textContent = g.title || ('Location ' + (idx+1));
-    const count = document.createElement('div'); count.className = 'toc-count'; count.textContent = g.items.length + ' photo' + (g.items.length>1?'s':'');
+    const title = document.createElement('div'); title.className = 'toc-title'; title.textContent = g.title || ('Loc ' + (idx+1));
+    const count = document.createElement('div'); count.className = 'toc-count'; count.textContent = g.items.length + ' foto' + (g.items.length>1?'s':'');
     item.appendChild(dot); item.appendChild(title); item.appendChild(count);
     item.onclick = ()=>{
       document.querySelectorAll('.toc-item').forEach(el=>el.classList.remove('active'));
@@ -471,6 +483,7 @@ function buildTOC(groups) {
 }
 
 async function initMap() {
+  // sidebar refs
   left.toc = document.getElementById('toc');
   left.explain = document.getElementById('explain');
   left.lightbox = document.getElementById('lightbox');
@@ -535,7 +548,7 @@ async function initMap() {
 </html>`;
 }
 
-/* === BUILD: list Dropbox, derive GPS, make thumbs, reverse geocode (optional), write JSON & HTML === */
+/* === BUILD: list Dropbox, derive GPS, merge overrides, write JSON & HTML === */
 (async () => {
   console.log("Listing Dropbox shared folder…");
   let dbx;
@@ -543,6 +556,10 @@ async function initMap() {
     dbx = await makeDbx();
   } catch (e) { console.error(e); process.exit(1); }
 
+  // Load research overrides
+  const overrides = await loadOverrides();
+
+  // List files (with 401 retry)
   let entries;
   try {
     entries = await listAll(dbx);
@@ -572,8 +589,10 @@ async function initMap() {
 
   for (const f of entries) {
     try {
+      const key = baseKey(f.name);
       let lon=null, lat=null, when=null, source=null;
 
+      // GPS via media_info
       const media = f.media_info?.metadata;
       if (media?.location) {
         lat = media.location?.latitude ?? null;
@@ -581,12 +600,11 @@ async function initMap() {
         when = media?.time_taken || null;
         if (lat!=null && lon!=null) { viaMedia++; source="media_info"; }
       }
+      // Filename guess
       if (lat==null || lon==null) {
         const g = guessFromFilename(f.name);
         if (g){ [lon,lat]=g; viaGuess++; source = source || "filename"; }
       }
-
-      // If we still don't have coords, skip
       if (lat==null || lon==null) { skipped++; continue; }
 
       // Place naming via reverse geocode (optional)
@@ -596,9 +614,15 @@ async function initMap() {
         if (placeInfo) viaNom++;
       }
 
-      const baseTitle = titleFromFilename(f.name);
-      const placeTitle = placeInfo?.niceTitle || baseTitle;
-      const blurb = makeBlurb(placeTitle, placeInfo?.components);
+      // Compute auto title/blurb (fallbacks)
+      const autoBaseTitle = titleFromFilename(f.name);
+      const autoPlaceTitle = placeInfo?.niceTitle || autoBaseTitle;
+      const autoBlurb = makeBlurb(autoPlaceTitle, placeInfo?.components);
+
+      // Apply overrides from cuprins if present
+      const ov = overrides.get(key) || null;
+      const cuprinsTitle = ov?.title?.trim() || "";
+      const cuprinsDesc  = ov?.description?.trim() || "";
 
       // Links
       const { pageUrl, rawUrl } = await filePageAndRaw(dbx, f.path_lower);
@@ -627,9 +651,11 @@ async function initMap() {
       features.push({
         type: "Feature",
         properties: {
-          title: esc(baseTitle),
-          place_title: esc(placeTitle),
-          blurb: esc(blurb),
+          title: esc(autoBaseTitle),
+          place_title: esc(autoPlaceTitle),
+          blurb: esc(autoBlurb),
+          cuprins_title: esc(cuprinsTitle),
+          cuprins_desc: esc(cuprinsDesc),
           taken_at: when,
           source,
           original_page: pageUrl,
@@ -646,8 +672,7 @@ async function initMap() {
   }
 
   // Persist geocache
-  const cacheObj = {};
-  for (const [k,v] of geoCache.entries()) cacheObj[k] = v;
+  const cacheObj = {}; for (const [k,v] of geoCache.entries()) cacheObj[k]=v;
   await fs.writeFile("site/geocache.json", JSON.stringify(cacheObj, null, 2), "utf8");
 
   // Write outputs
