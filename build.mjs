@@ -68,7 +68,7 @@ async function listAll(sharedUrl){
   return files;
 }
 
-/* Build a page URL + a raw ?raw=1 URL from the folder shared link */
+/* Build page URL + raw ?raw=1 URL from shared link */
 async function filePageAndRaw(sharedFolderUrl, subpathLower){
   try{
     const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
@@ -125,7 +125,7 @@ async function fetchThumbViaId(fileId){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML (single InfoWindow, pagination, cluster zoom step, zoom cap, lightbox w/ prev-next) === */
+/* === HTML (single InfoWindow, pagination, smart cluster zoom, lightbox with prev/next) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -167,7 +167,8 @@ function htmlTemplate({ dataUrl, apiKey }){
 
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
-const MAX_AUTO_ZOOM = 8;
+const MAX_INIT_ZOOM = 8;      // after initial fit
+const MAX_CLUSTER_ZOOM = 12;  // when opening a cluster
 
 function groupByCoord(features) {
   const by = new Map();
@@ -176,7 +177,7 @@ function groupByCoord(features) {
     const p = f.properties || {};
     if (!c || c.length < 2) continue;
     const lat = c[1], lng = c[0];
-    const key = lat.toFixed(5) + "," + lng.toFixed(5); // group within ~1m
+    const key = lat.toFixed(5) + "," + lng.toFixed(5);
     const item = {
       title: p.title || "",
       taken_at: p.taken_at || "",
@@ -197,8 +198,7 @@ async function initMap() {
     mapTypeControl: false
   });
 
-  // Maintain exactly one InfoWindow
-  const info = new google.maps.InfoWindow();
+  const info = new google.maps.InfoWindow(); // exactly one open at a time
 
   // Lightbox state & helpers
   const lb = document.getElementById('lightbox');
@@ -222,32 +222,22 @@ async function initMap() {
     lbPrev.style.display = (n > 1) ? "block" : "none";
     lbNext.style.display = (n > 1) ? "block" : "none";
   }
-  function openLightbox(group, index) {
-    lbState = { group, index };
-    renderLightbox();
-    lb.style.display = 'flex';
-  }
-  function closeLightbox() {
-    lb.style.display = 'none';
-    lbImg.src = '';
-    lbState = null;
-  }
+  function openLightbox(group, index) { lbState = { group, index }; renderLightbox(); lb.style.display = 'flex'; }
+  function closeLightbox() { lb.style.display = 'none'; lbImg.src = ''; lbState = null; }
   lb.addEventListener('click', (e)=>{ if(e.target===lb || e.target===lbClose) closeLightbox(); });
   lbPrev.addEventListener('click', (e)=>{ e.preventDefault(); if(lbState){ lbState.index--; renderLightbox(); }});
   lbNext.addEventListener('click', (e)=>{ e.preventDefault(); if(lbState){ lbState.index++; renderLightbox(); }});
   document.addEventListener('keydown', (e)=>{
     if (lb.style.display === 'flex') {
       if (e.key === 'Escape') closeLightbox();
-      if (e.key === 'ArrowLeft') { e.preventDefault(); if(lbState){ lbState.index--; renderLightbox(); } }
-      if (e.key === 'ArrowRight'){ e.preventDefault(); if(lbState){ lbState.index++; renderLightbox(); } }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); if(lbState){ lbState.index--; renderLightbox(); } }
+      if (e.key === 'ArrowRight') { e.preventDefault(); if(lbState){ lbState.index++; renderLightbox(); } }
     }
   });
 
   try {
     const res = await fetch('${dataUrl}?ts=' + Date.now());
     const geo = await res.json();
-
-    // Group multiple photos at identical coords
     const groups = groupByCoord(geo.features || []);
     const markers = [];
 
@@ -277,7 +267,6 @@ async function initMap() {
       info.setContent(html);
       info.open({ anchor: marker, map });
 
-      // Wire controls once DOM is ready for THIS content
       google.maps.event.addListenerOnce(info, 'domready', () => {
         const prev = document.querySelector('.gm-prev');
         const next = document.querySelector('.gm-next');
@@ -285,46 +274,37 @@ async function initMap() {
 
         if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i-1); };
         if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i+1); };
-
-        if (link) link.onclick = (e)=>{
-          e.preventDefault();
-          openLightbox(g, i);
-        };
+        if (link) link.onclick = (e)=>{ e.preventDefault(); openLightbox(g, i); };
       });
     }
 
-    // Create one marker per group
+    // One marker per grouped coordinate
     for (const g of groups) {
       const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
       m.addListener('click', () => renderPopup(m, g, 0));
       markers.push(m);
     }
 
-    // Cluster with step-zoom behavior and popup closing
+    // CLUSTER: open by fitting bounds, then cap zoom so it doesn't dive to street level
     new markerClusterer.MarkerClusterer({
       map,
       markers,
       onClusterClick: (ev) => {
-        // Close any open popup so cluster click always works
-        info.close();
-
-        // Step-zoom toward the cluster, but cap at MAX_AUTO_ZOOM
-        const current = map.getZoom() ?? 6;
-        const target = Math.min(current + 2, MAX_AUTO_ZOOM);
-
-        // Pan to cluster center; then set zoom (no aggressive street-level dive)
-        map.panTo(ev.cluster.position);
-        map.setZoom(target);
+        info.close(); // close any open popup first
+        map.fitBounds(ev.cluster.bounds, 60);
+        google.maps.event.addListenerOnce(map, 'idle', () => {
+          if (map.getZoom() > MAX_CLUSTER_ZOOM) map.setZoom(MAX_CLUSTER_ZOOM);
+        });
       }
     });
 
-    // Fit bounds initially, but cap zoom (keep it higher)
+    // Initial fit to all markers, capped at MAX_INIT_ZOOM
     if (markers.length) {
       const b = new google.maps.LatLngBounds();
       markers.forEach(m => b.extend(m.getPosition()));
       map.fitBounds(b);
       google.maps.event.addListenerOnce(map, 'idle', () => {
-        if (map.getZoom() > MAX_AUTO_ZOOM) map.setZoom(MAX_AUTO_ZOOM);
+        if (map.getZoom() > MAX_INIT_ZOOM) map.setZoom(MAX_INIT_ZOOM);
       });
     }
   } catch (e) {
