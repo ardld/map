@@ -19,10 +19,10 @@ const dbx = new Dropbox({ accessToken: DROPBOX_TOKEN, fetch });
 const IMAGE_EXTS = [".jpg",".jpeg",".png",".webp",".tif",".tiff",".heic",".heif"];
 const isImage = n => IMAGE_EXTS.some(ext => (n||"").toLowerCase().endsWith(ext));
 const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
-const md5 = s => crypto.createHash("md5").update(s).digest("hex");
-const esc = s => String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const md5  = s => crypto.createHash("md5").update(s).digest("hex");
+const esc  = s => String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
-/* Gazetteer [lon,lat] */
+/* Tiny RO gazetteer [lon,lat] */
 const GAZ = {
   "breb":[23.9049,47.7485],"barsana":[24.0425,47.7367],"bethlen cris":[24.671,46.1932],
   "cris":[24.671,46.1932],"brateiu":[24.3826,46.1491],"bistrita":[24.5,47.133],
@@ -37,7 +37,6 @@ const GAZ = {
   "rasova":[27.9344,44.2458],"seimeni":[28.0713,44.3932],"izvoarele":[28.165,44.392],
   "topalu":[28.011,44.531],"ogra":[24.289,46.464],"haller":[24.289,46.464],"dupus":[24.2164,46.2178]
 };
-
 const guessFromFilename = (name="") => {
   const t = norm(name);
   const keys = Object.keys(GAZ).filter(k=>t.includes(k)).sort((a,b)=>b.length-a.length);
@@ -69,7 +68,7 @@ async function listAll(sharedUrl){
   return files;
 }
 
-/* Build a page URL + a raw URL from the folder shared link */
+/* Build a page URL + a raw ?raw=1 URL from the folder shared link */
 async function filePageAndRaw(sharedFolderUrl, subpathLower){
   try{
     const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
@@ -82,7 +81,7 @@ async function filePageAndRaw(sharedFolderUrl, subpathLower){
   }
 }
 
-/* Try 1: thumbnail via SHARED LINK */
+/* Try A: thumbnail via SHARED LINK */
 async function fetchThumbViaSharedLink(sharedFolderUrl, subpathLower){
   const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
   const arg = {
@@ -104,12 +103,11 @@ async function fetchThumbViaSharedLink(sharedFolderUrl, subpathLower){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* Try 2: thumbnail via FILE ID (works when token owns/has the folder) */
+/* Try B: thumbnail via FILE ID (if token has direct access) */
 async function fetchThumbViaId(fileId){
   const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
-  // Most Dropbox file IDs already include the "id:" prefix. Use as-is.
   const arg = {
-    resource: { ".tag":"path", "path": fileId },
+    resource: { ".tag":"path", "path": fileId },   // Dropbox accepts ids and paths here
     format:   { ".tag":"jpeg" },
     mode:     { ".tag":"fitone_bestfit" },
     size:     { ".tag":"w1024h768" }
@@ -127,7 +125,7 @@ async function fetchThumbViaId(fileId){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML === */
+/* === HTML (with: single InfoWindow, pagination, zoom cap, lightbox) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -137,56 +135,147 @@ function htmlTemplate({ dataUrl, apiKey }){
 <title>Photo Map • Google Maps</title>
 <style>
   html, body, #map { height: 100%; margin: 0; }
-  .gm-popup { max-width: 320px; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .gm-popup img { width: 100%; height: auto; display: block; border-radius: 8px; margin-bottom: 6px; }
-  .gm-title { font-weight: 600; margin-bottom: 2px; }
+  .gm-popup { max-width: 340px; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .gm-popup .imgwrap { position: relative; }
+  .gm-popup img { width: 100%; height: auto; display: block; border-radius: 8px; }
+  .gm-title { font-weight: 600; margin: 6px 0 2px 0; }
   .gm-meta { opacity: .7; font-size: 12px; }
+  .gm-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+  .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .gm-count { font-size: 12px; opacity: .7; }
+  /* Lightbox */
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; align-items: center; justify-content: center; z-index: 9999; }
+  #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
+  #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
+<!-- Lightbox -->
+<div id="lightbox">
+  <span class="close" aria-label="Close">×</span>
+  <img alt="">
+</div>
+
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
+function groupByCoord(features) {
+  const by = new Map();
+  for (const f of features) {
+    const c = f.geometry?.coordinates;
+    const p = f.properties || {};
+    if (!c || c.length < 2) continue;
+    const lat = c[1], lng = c[0];
+    const key = lat.toFixed(5) + "," + lng.toFixed(5); // group within ~1m
+    const item = {
+      title: p.title || "",
+      taken_at: p.taken_at || "",
+      thumb: p.thumb || null,
+      thumb_external: p.thumb_external || null,
+      full_external: p.full_external || p.thumb_external || p.thumb || null
+    };
+    if (!by.has(key)) by.set(key, { lat, lng, items: [item] });
+    else by.get(key).items.push(item);
+  }
+  return Array.from(by.values());
+}
+
 async function initMap() {
   const map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 45.94, lng: 25.0 }, zoom: 6, mapTypeControl: false
+    center: { lat: 45.94, lng: 25.0 },
+    zoom: 6,
+    mapTypeControl: false
   });
+
+  const info = new google.maps.InfoWindow(); // single InfoWindow => only one open at a time
+
+  // Lightbox helpers
+  const lb = document.getElementById('lightbox');
+  const lbImg = lb.querySelector('img');
+  const lbClose = lb.querySelector('.close');
+  lb.addEventListener('click', (e)=>{ if(e.target===lb || e.target===lbClose) { lb.style.display='none'; lbImg.src=''; }});
+  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') { lb.style.display='none'; lbImg.src=''; }});
 
   try {
     const res = await fetch('${dataUrl}?ts=' + Date.now());
     const geo = await res.json();
+
+    // Group multiple photos at identical coords
+    const groups = groupByCoord(geo.features || []);
     const markers = [];
 
-    for (const f of geo.features || []) {
-      const c = f.geometry?.coordinates;
-      if (!c || c.length < 2) continue;
-      const lat = c[1], lng = c[0];
-
-      const p = f.properties || {};
-      const title = p.title || '';
-      const imgSrc = p.thumb || p.thumb_external || null;   // 👈 fallback to external raw link
-      const linkTo = p.original_page || p.thumb_external || null;
-
+    function renderPopup(marker, g, idx) {
+      const n = g.items.length;
+      const i = ((idx % n) + n) % n;
+      const it = g.items[i];
+      const imgSrc = it.thumb || it.thumb_external || null;
       const html =
-        '<div class="gm-popup">' +
-          (imgSrc ? ('<a ' + (linkTo ? 'href="'+linkTo+'" target="_blank" rel="noopener"' : '') + '>' +
-                     '<img loading="lazy" src="'+imgSrc+'" alt="'+title+'"></a>') : '') +
-          '<div class="gm-title">' + title + '</div>' +
-          (p.taken_at ? '<div class="gm-meta">' + p.taken_at + '</div>' : '') +
+        '<div class="gm-popup" data-idx="'+i+'">' +
+          (n>1 ? (
+            '<div class="gm-pager">' +
+              '<button class="gm-btn gm-prev" aria-label="Previous">‹ Prev</button>' +
+              '<span class="gm-count">'+(i+1)+' / '+n+'</span>' +
+              '<button class="gm-btn gm-next" aria-label="Next">Next ›</button>' +
+            '</div>'
+          ) : '') +
+          (imgSrc ? ('<div class="imgwrap">' +
+                       '<a href="#" class="imglink" data-full="'+(it.full_external||'')+'">' +
+                         '<img loading="lazy" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
+                       '</a>' +
+                     '</div>') : '') +
+          '<div class="gm-title">'+(it.title||'')+'</div>' +
+          (it.taken_at ? '<div class="gm-meta">'+it.taken_at+'</div>' : '') +
         '</div>';
 
-      const info = new google.maps.InfoWindow({ content: html });
-      const m = new google.maps.Marker({ position: { lat, lng }, title });
-      m.addListener('click', () => info.open({ anchor: m, map }));
+      info.setContent(html);
+      info.open({ anchor: marker, map });
+
+      // Wire controls once DOM is ready for THIS content
+      google.maps.event.addListenerOnce(info, 'domready', () => {
+        const box = document.querySelector('.gm-popup');
+        const prev = document.querySelector('.gm-prev');
+        const next = document.querySelector('.gm-next');
+        const link = document.querySelector('.imglink');
+
+        if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i-1); };
+        if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i+1); };
+
+        if (link) link.onclick = (e)=>{
+          e.preventDefault();
+          const full = link.getAttribute('data-full');
+          if (full) { lbImg.src = full; lb.style.display = 'flex'; }
+        };
+      });
+    }
+
+    // Create one marker per group
+    for (const g of groups) {
+      const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
+      m.addListener('click', () => renderPopup(m, g, 0));
       markers.push(m);
     }
 
+    // Cluster with a gentle cluster-zoom
+    new markerClusterer.MarkerClusterer({
+      map,
+      markers,
+      onClusterClick: (ev) => {
+        const bounds = ev.cluster.bounds;
+        map.fitBounds(bounds);
+        // Cap zoom so it doesn't dive into street level
+        setTimeout(() => { if (map.getZoom() > 8) map.setZoom(8); }, 0);
+      }
+    });
+
+    // Fit bounds initially, but cap zoom (keep it higher)
     if (markers.length) {
-      new markerClusterer.MarkerClusterer({ map, markers });
       const b = new google.maps.LatLngBounds();
       markers.forEach(m => b.extend(m.getPosition()));
       map.fitBounds(b);
+      google.maps.event.addListenerOnce(map, 'idle', () => {
+        if (map.getZoom() > 8) map.setZoom(8);
+      });
     }
   } catch (e) {
     console.error('Failed to load data', e);
@@ -214,7 +303,7 @@ async function initMap() {
     try {
       let lon=null, lat=null, when=null, source=null;
 
-      // 1) GPS from Dropbox media_info
+      // 1) GPS via media_info
       const media = f.media_info?.metadata;
       if (media?.location) {
         lat = media.location?.latitude ?? null;
@@ -223,7 +312,7 @@ async function initMap() {
         if (lat!=null && lon!=null) { viaMedia++; source="media_info"; }
       }
 
-      // 2) Guess from filename
+      // 2) Filename guess
       if (lat==null || lon==null) {
         const g = guessFromFilename(f.name);
         if (g){ [lon,lat]=g; viaGuess++; source = source || "filename"; }
@@ -233,27 +322,22 @@ async function initMap() {
       if ((lat==null || lon==null) && ENABLE_NOMINATIM) {
         const urlName = f.name.replace(/\.[^.]+$/,"").replace(/[_\-.]+/g," ").trim();
         try{
-          const gg = await (async ()=> {
-            const u = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(urlName)}&format=jsonv2&limit=1`;
-            const r = await fetch(u, { headers:{ "User-Agent":"RealRomania-PhotoMap/1.0" } });
-            if(!r.ok) return null;
+          const u = \`https://nominatim.openstreetmap.org/search?q=\${encodeURIComponent(urlName)}&format=jsonv2&limit=1\`;
+          const r = await fetch(u, { headers:{ "User-Agent":"RealRomania-PhotoMap/1.0" } });
+          if (r.ok) {
             const d = await r.json();
-            if(Array.isArray(d) && d.length) return [parseFloat(d[0].lon), parseFloat(d[0].lat)];
-            return null;
-          })();
-          if (gg){ [lon,lat]=gg; viaNom++; source = source || "nominatim"; }
+            if (Array.isArray(d) && d.length) { [lon,lat] = [parseFloat(d[0].lon), parseFloat(d[0].lat)]; viaNom++; source = source || "nominatim"; }
+          }
         }catch{}
       }
 
       if (lat==null || lon==null) { skipped++; continue; }
 
-      // Build click-through + potential external raw URL
+      // Per-file links
       const { pageUrl, rawUrl } = await filePageAndRaw(DROPBOX_SHARED_URL, f.path_lower);
 
-      // Try to create a local thumbnail (two strategies)
+      // Try local thumbnail (A then B)
       let thumbRel = null;
-
-      // Strategy A: shared link
       try {
         const buf = await fetchThumbViaSharedLink(DROPBOX_SHARED_URL, f.path_lower);
         const name = "t-" + md5(f.path_lower) + ".jpg";
@@ -261,8 +345,6 @@ async function initMap() {
         thumbRel = "thumbs/" + name;
         thumbs++;
       } catch {}
-
-      // Strategy B: file id (if A failed)
       if (!thumbRel && f.id) {
         try {
           const buf2 = await fetchThumbViaId(f.id);
@@ -273,12 +355,9 @@ async function initMap() {
         } catch {}
       }
 
-      // External raw fallback used directly in <img>
+      // External raw fallback (used in lightbox and, if needed, as <img>)
       let thumbExternal = null;
-      if (!thumbRel && rawUrl) {
-        thumbExternal = rawUrl;
-        extLinks++;
-      }
+      if (!thumbRel && rawUrl) { thumbExternal = rawUrl; extLinks++; }
 
       features.push({
         type: "Feature",
@@ -287,13 +366,14 @@ async function initMap() {
           taken_at: when,
           source,
           original_page: pageUrl,
-          thumb: thumbRel,              // local file under site/thumbs
-          thumb_external: thumbExternal // direct Dropbox raw URL fallback
+          thumb: thumbRel,               // local thumbnail
+          thumb_external: thumbExternal, // fallback for <img>
+          full_external: rawUrl          // always try to provide a bigger image for lightbox
         },
         geometry: { type: "Point", coordinates: [lon, lat] }
       });
 
-    } catch (e) {
+    } catch {
       skipped++;
     }
   }
