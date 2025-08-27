@@ -1,4 +1,9 @@
-// buildi.js
+// buildi.js — builds static site into ./site
+// - pulls Dropbox shared folder, extracts GPS (EXIF) or guesses from filename
+// - writes site/locations.json + site/thumbs/*
+// - writes site/index.html (Google Maps; centered on Romania)
+// env needed at build-time: DROPBOX_* + GMAPS_API_KEY
+
 import { Dropbox } from "dropbox";
 import fs from "fs/promises";
 import path from "path";
@@ -6,19 +11,19 @@ import fetch from "node-fetch";
 import crypto from "node:crypto";
 
 /* === Config (env) === */
-const RAW_TOKEN       = process.env.DROPBOX_TOKEN;            // opțional (poate expira)
-const REFRESH         = process.env.DROPBOX_REFRESH_TOKEN;     // recomandat (nu expiră)
+const RAW_TOKEN       = process.env.DROPBOX_TOKEN;            // optional (may expire)
+const REFRESH         = process.env.DROPBOX_REFRESH_TOKEN;     // recommended (long-lived)
 const APP_KEY         = process.env.DROPBOX_APP_KEY;
 const APP_SECRET      = process.env.DROPBOX_APP_SECRET;
-const SHARED_URL      = process.env.DROPBOX_SHARED_URL;        // NECESAR
-const GMAPS_API_KEY   = process.env.GMAPS_API_KEY || "";       // cheie Google Maps pt. front-end
-const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1"; // opțional: denumiri locuri
+const SHARED_URL      = process.env.DROPBOX_SHARED_URL;        // REQUIRED (shared folder link)
+const GMAPS_API_KEY   = process.env.GMAPS_API_KEY || "";       // Google Maps JS key
+const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1"; // optional reverse geocode
 const NOMINATIM_EMAIL  = process.env.NOMINATIM_EMAIL || "";
 const NOMI_THROTTLE    = parseInt(process.env.NOMINATIM_THROTTLE_MS || "1100", 10);
 
-if (!SHARED_URL) throw new Error("Lipsește variabila DROPBOX_SHARED_URL");
+if (!SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
 
-/* === Autentificare Dropbox === */
+/* === Auth Dropbox === */
 async function fetchAccessTokenViaRefresh() {
   if (!REFRESH || !APP_KEY || !APP_SECRET) return null;
   const form = new URLSearchParams({ grant_type: "refresh_token", refresh_token: REFRESH });
@@ -34,30 +39,30 @@ async function fetchAccessTokenViaRefresh() {
 }
 async function getAccessToken() {
   if (REFRESH && APP_KEY && APP_SECRET) {
-    console.log("Folosesc token Dropbox prin refresh.");
+    console.log("Using Dropbox refresh token.");
     return await fetchAccessTokenViaRefresh();
   }
   if (RAW_TOKEN) {
-    console.log("Folosesc DROPBOX_TOKEN (poate expira).");
+    console.log("Using DROPBOX_TOKEN (may expire).");
     return RAW_TOKEN;
   }
-  throw new Error("Configurează fie refresh (DROPBOX_REFRESH_TOKEN + APP_KEY + APP_SECRET), fie DROPBOX_TOKEN.");
+  throw new Error("Configure refresh (DROPBOX_REFRESH_TOKEN + APP_KEY + APP_SECRET) or DROPBOX_TOKEN.");
 }
 async function makeDbx() {
   const token = await getAccessToken();
   return new Dropbox({ accessToken: token, fetch });
 }
 
-/* === Utilitare === */
+/* === Utils === */
 const IMAGE_EXTS = [".jpg",".jpeg",".png",".webp",".tif",".tiff",".heic",".heif"];
 const isImage = n => IMAGE_EXTS.some(ext => (n||"").toLowerCase().endsWith(ext));
 const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
 const md5  = s => crypto.createHash("md5").update(s).digest("hex");
 const esc  = s => String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const baseKey = name => name.toLowerCase().replace(/\.[^.]+$/,'').trim();
+const baseKey = name => (name||"").toLowerCase().replace(/\.[^.]+$/,'').trim();
 
-/* Ghid orientativ RO [lon,lat] pt. deducere din nume de fișier */
+/* filename -> rough [lon,lat] for Romanian highlights */
 const GAZ = {
   "breb":[23.9049,47.7485],"barsana":[24.0425,47.7367],"bethlen cris":[24.671,46.1932],
   "cris":[24.671,46.1932],"brateiu":[24.3826,46.1491],"bistrita":[24.5,47.133],
@@ -78,7 +83,7 @@ const guessFromFilename = (name="") => {
   return keys.length ? GAZ[keys[0]] : null;
 };
 
-/* === Reverse geocoding (opțional) === */
+/* Reverse geocode (optional) */
 const geoCache = new Map(); // "lat,lng" -> { niceTitle, components }
 async function reverseGeocode(lat, lng){
   const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
@@ -99,7 +104,7 @@ async function reverseGeocode(lat, lng){
   if (!j) { geoCache.set(key,null); return null; }
 
   const addr = j.address || {};
-  const name = j.name || addr.tourism || addr.historic || addr.natural || addr.village || addr.town || addr.city || "România";
+  const name = j.name || addr.tourism || addr.historic || addr.natural || addr.village || addr.town || addr.city || "Romania";
   const county = addr.county || addr.state || "";
   const niceTitle = county ? `${name}, ${county}` : name;
   const info = { niceTitle, components: addr };
@@ -107,29 +112,23 @@ async function reverseGeocode(lat, lng){
   return info;
 }
 
-/* === Text fallback în română (dacă nu există în content.json) === */
+/* Fallback text in EN (used only if no override in content.json) */
 function makeBlurb(niceTitle, components) {
-  const area = components?.county || components?.state || "România";
-  return `${niceTitle} este un loc fotogenic din ${area}. Oprește pentru o plimbare scurtă, o priveliște bună și un strop de atmosferă — ușor de inclus în orice itinerar.`;
+  const area = components?.county || components?.state || "Romania";
+  return `${niceTitle} is a photogenic stop in ${area}. Take a short walk, find a view, and let it fold into your itinerary.`;
 }
 function titleFromFilename(name) {
-  const base = name.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').trim();
+  const base = (name||"").replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').trim();
   const words = base.split(/\s+/).map(w=>w[0]?w[0].toUpperCase()+w.slice(1):w);
   return words.join(' ');
 }
 
-/* === Citire content.json: nume exacte + patternuri RegExp ===
-   Format:
-   [
-     { "filename": "Feldioara.jpg", "title": "...", "description": "..." },
-     { "pattern": "^capidava", "title": "...", "description": "..." }
-   ]
-*/
+/* Load content.json overrides (root) */
 async function loadOverrides() {
   try {
     const txt = await fs.readFile("content.json","utf8");
     const arr = JSON.parse(txt);
-    const byName = new Map(); // baza numelui (fără extensie), litere mici
+    const byName = new Map(); // base filename (no ext), lowercased
     const patterns = [];      // [{ re: RegExp, data: {title, description}}]
 
     for (const it of arr) {
@@ -142,15 +141,15 @@ async function loadOverrides() {
         patterns.push({ re: new RegExp(it.pattern, "i"), data: { title, description } });
       }
     }
-    console.log(`Overrides: ${byName.size} nume și ${patterns.length} patternuri.`);
+    console.log(`Overrides: ${byName.size} names & ${patterns.length} patterns.`);
     return { byName, patterns };
   } catch {
-    console.log("Nu există content.json — folosesc generarea automată.");
+    console.log("No content.json — using automatic titles/descriptions.");
     return { byName: new Map(), patterns: [] };
   }
 }
 
-/* === Listare Dropbox === */
+/* Dropbox listing */
 async function listAll(dbx){
   const shared_link = { url: SHARED_URL };
   const files = [], queue = [""];
@@ -175,7 +174,7 @@ async function listAll(dbx){
   return files;
 }
 
-/* === Linkuri & thumbnails === */
+/* Links & thumbnails */
 async function filePageAndRaw(dbx, subpathLower){
   try{
     const meta = await dbx.sharingGetSharedLinkMetadata({ url: SHARED_URL, path: subpathLower });
@@ -228,10 +227,10 @@ async function fetchThumbViaIdOrPath(dbx, idOrPath){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML (temă deschisă, DESCRIEREA sus, apoi lista) === */
+/* HTML template (centered on Romania) */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
-<html lang="ro">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -243,12 +242,10 @@ function htmlTemplate({ dataUrl, apiKey }){
   #wrap { display: grid; grid-template-columns: var(--left) 1fr; height: 100%; }
   #left { background: var(--panel); border-right: 1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
   #brand { padding: 12px 14px; border-bottom:1px solid var(--border); font-weight:650; letter-spacing:.2px; }
-  /* DESCRIEREA de sus */
   #explain { padding: 14px; border-bottom:1px solid var(--border); }
   #explain h3 { margin: 6px 0 0 0; font-size: 16px; }
   #explain p { margin: 0 0 8px 0; color: var(--muted); }
   #explain .thumb { width: 100%; border-radius:12px; margin-top:10px; display:block; border:1px solid var(--border); }
-  /* Lista (cuprins) dedesubt */
   #toc { padding: 8px; overflow:auto; flex: 1 1 auto; }
   .toc-item { padding: 8px 10px; border-radius: 10px; cursor: pointer; display:flex; align-items:center; gap:10px; border:1px solid transparent; }
   .toc-item:hover { background:#eef3ff; border-color:#dde7ff; }
@@ -257,7 +254,6 @@ function htmlTemplate({ dataUrl, apiKey }){
   .toc-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
   .toc-count { margin-left:auto; color:var(--muted); font-size:12px; }
   #map { width: 100%; height: 100%; }
-  /* InfoWindow pe hartă */
   .gm-popup { max-width: 360px; }
   .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:10px; }
   .gm-pager { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
@@ -278,35 +274,43 @@ function htmlTemplate({ dataUrl, apiKey }){
 <body>
 <div id="wrap">
   <div id="left">
-    <div id="brand">Real Romania • Cuprins</div>
-
-    <!-- DESCRIEREA sus -->
+    <div id="brand">Real Romania • Contents</div>
     <div id="explain">
-      <p>Selectează un loc din listă sau un pin pe hartă. Când alegi, aici vezi descrierea (mai întâi) și o miniatură; imaginea se deschide mare la click.</p>
+      <p>Select a place from the list or a pin on the map. When you pick one, you’ll see the description (first) and a thumbnail here; click the photo for a full-screen view.</p>
       <h3>&nbsp;</h3>
     </div>
-
-    <!-- LISTA dedesubt -->
-    <div id="toc" role="navigation" aria-label="Locuri"></div>
+    <div id="toc" role="navigation" aria-label="Places"></div>
   </div>
-
   <div id="map"></div>
 </div>
 
-<!-- Lightbox -->
 <div id="lightbox" aria-modal="true" role="dialog">
-  <span class="close" aria-label="Închide">×</span>
-  <button class="nav prev" aria-label="Înapoi">‹</button>
+  <span class="close" aria-label="Close">×</span>
+  <button class="nav prev" aria-label="Previous">‹</button>
   <img alt="">
-  <button class="nav next" aria-label="Înainte">›</button>
+  <button class="nav next" aria-label="Next">›</button>
   <div class="counter"></div>
 </div>
 
 <script>
 const DATA_URL = '${dataUrl}?ts=' + Date.now();
-</script>
-<script src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap" defer async></script>
-<script>
+
+// small helper to toggle dropbox raw/dl param when an image fails
+function toggleDropboxParam(u){
+  try{
+    const url = new URL(u);
+    if (url.hostname.includes('dropbox')) {
+      const hasRaw = url.searchParams.get('raw') === '1';
+      const hasDl  = url.searchParams.get('dl') === '1';
+      if (hasRaw) { url.searchParams.delete('raw'); url.searchParams.set('dl','1'); }
+      else if (hasDl) { url.searchParams.delete('dl'); url.searchParams.set('raw','1'); }
+      else { url.searchParams.set('raw','1'); }
+      return url.toString();
+    }
+  }catch{}
+  return u;
+}
+
 function groupByCoord(features) {
   const by = new Map();
   for (const f of features) {
@@ -330,7 +334,6 @@ function groupByCoord(features) {
     if (!by.has(key)) by.set(key, { lat, lng, items: [item] });
     else by.get(key).items.push(item);
   }
-  // titlu de grup = preferă titlul din cuprins
   return Array.from(by.values()).map(g=>{
     const pick = (get) => {
       const freq = new Map();
@@ -342,23 +345,9 @@ function groupByCoord(features) {
       for (const [t,c] of freq) if (t && c>bestCount) { best=t; bestCount=c; }
       return best;
     };
-    g.title = pick(it=>it.cuprins_title) || pick(it=>it.place_title) || "Loc";
+    g.title = pick(it=>it.cuprins_title) || pick(it=>it.place_title) || "Place";
     return g;
   });
-}
-function toggleDropboxParam(u){
-  try{
-    const url = new URL(u);
-    if (url.hostname.includes('dropbox')) {
-      const hasRaw = url.searchParams.get('raw') === '1';
-      const hasDl  = url.searchParams.get('dl') === '1';
-      if (hasRaw) { url.searchParams.delete('raw'); url.searchParams.set('dl','1'); }
-      else if (hasDl) { url.searchParams.delete('dl'); url.searchParams.set('raw','1'); }
-      else { url.searchParams.set('raw','1'); }
-      return url.toString();
-    }
-  }catch{}
-  return u;
 }
 
 let map, info;
@@ -368,10 +357,8 @@ let currentGroup = null;
 let currentIndex = 0;
 
 const left = {
-  toc: null,
-  explain: null,
-  lightbox: null,
-  lbImg: null, lbClose: null, lbPrev: null, lbNext: null, lbCount: null,
+  toc: null, explain: null,
+  lightbox: null, lbImg: null, lbClose: null, lbPrev: null, lbNext: null, lbCount: null,
 };
 
 function attachImgFallback(imgEl, it){
@@ -388,12 +375,9 @@ function renderExplain(group, idx){
   const ex = left.explain;
   ex.innerHTML = "";
 
-  // DESCRIEREA PRIMA (din cuprins dacă există)
   const p = document.createElement('p');  p.textContent = it.cuprins_desc || it.blurb || '';
-  const h = document.createElement('h3'); h.textContent = it.cuprins_title || it.place_title || it.title || 'Foto';
-
-  ex.appendChild(p);
-  ex.appendChild(h);
+  const h = document.createElement('h3'); h.textContent = it.cuprins_title || it.place_title || it.title || 'Photo';
+  ex.appendChild(p); ex.appendChild(h);
 
   const imgSrc = it.thumb || it.thumb_external || it.full_external;
   if (imgSrc) {
@@ -437,9 +421,9 @@ function renderPopup(marker, group, idx) {
     '<div class="gm-popup" data-idx="'+i+'">' +
       (n>1 ? (
         '<div class="gm-pager">' +
-          '<button class="gm-btn gm-prev" aria-label="Anterior">‹ Înapoi</button>' +
+          '<button class="gm-btn gm-prev" aria-label="Previous">‹ Prev</button>' +
           '<span class="gm-count">'+(i+1)+' / '+n+'</span>' +
-          '<button class="gm-btn gm-next" aria-label="Următor">Înainte ›</button>' +
+          '<button class="gm-btn gm-next" aria-label="Next">Next ›</button>' +
         '</div>'
       ) : '') +
       (imgSrc ? ('<div class="imgwrap">' +
@@ -475,8 +459,8 @@ function buildTOC(groups) {
     const item = document.createElement('div');
     item.className = 'toc-item';
     const dot = document.createElement('div'); dot.className = 'dot';
-    const title = document.createElement('div'); title.className = 'toc-title'; title.textContent = g.title || ('Loc ' + (idx+1));
-    const count = document.createElement('div'); count.className = 'toc-count'; count.textContent = g.items.length + ' foto' + (g.items.length>1?'s':'');
+    const title = document.createElement('div'); title.className = 'toc-title'; title.textContent = g.title || ('Place ' + (idx+1));
+    const count = document.createElement('div'); count.className = 'toc-count'; count.textContent = g.items.length + ' photo' + (g.items.length>1?'s':'');
     item.appendChild(dot); item.appendChild(title); item.appendChild(count);
     item.onclick = ()=>{
       document.querySelectorAll('.toc-item').forEach(el=>el.classList.remove('active'));
@@ -490,8 +474,7 @@ function buildTOC(groups) {
   });
 }
 
-async function initMap() {
-  // referințe panou stânga
+window.initMap = async function initMap() {
   left.toc = document.getElementById('toc');
   left.explain = document.getElementById('explain');
   left.lightbox = document.getElementById('lightbox');
@@ -514,7 +497,7 @@ async function initMap() {
   });
 
   map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 45.94, lng: 25.0 },
+    center: { lat: 45.9432, lng: 24.9668 }, // Romania center
     zoom: 6,
     mapTypeControl: false,
     streetViewControl: false,
@@ -528,7 +511,7 @@ async function initMap() {
     groups = groupByCoord(geo.features || []);
     markers = [];
 
-    // fără clustere
+    // plain markers (no cluster)
     for (const g of groups) {
       const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
       m.addListener('click', () => renderPopup(m, g, 0));
@@ -536,29 +519,21 @@ async function initMap() {
     }
     markers.forEach(m=>m.setMap(map));
 
-    // încadrăm totul la început
-    if (markers.length) {
-      const b = new google.maps.LatLngBounds();
-      markers.forEach(m => b.extend(m.getPosition()));
-      map.fitBounds(b);
-      google.maps.event.addListenerOnce(map, 'idle', () => {
-        if (map.getZoom() > 8) map.setZoom(8);
-      });
-    }
-
+    // fixed center/zoom stays (no auto-fit)
     buildTOC(groups);
   } catch (e) {
-    console.error('Eroare la încărcarea datelor', e);
+    console.error('Failed to load data', e);
   }
-}
+};
 </script>
+<script src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap" defer async></script>
 </body>
 </html>`;
 }
 
-/* === BUILD: listare, GPS, overrides, thumbs, JSON + HTML === */
+/* === BUILD === */
 (async () => {
-  console.log("Listare folder partajat Dropbox…");
+  console.log("Listing Dropbox shared folder…");
   let dbx;
   try {
     dbx = await makeDbx();
@@ -571,7 +546,7 @@ async function initMap() {
     entries = await listAll(dbx);
   } catch (e) {
     if (e?.status === 401 && REFRESH && APP_KEY && APP_SECRET) {
-      console.warn("Token expirat; reîmprospătez și reîncerc…");
+      console.warn("Expired token; refreshing and retrying…");
       dbx = await makeDbx();
       entries = await listAll(dbx);
     } else {
@@ -579,15 +554,15 @@ async function initMap() {
     }
   }
 
-  console.log(`Am găsit ${entries.length} imagini.`);
+  console.log(`Found ${entries.length} images.`);
   await fs.mkdir("site", { recursive: true });
   await fs.mkdir("site/thumbs", { recursive: true });
 
   let viaMedia=0, viaGuess=0, viaNom=0, thumbs=0, extLinks=0, skipped=0;
   const features = [];
 
-  // cache pentru reverse geocode între build-uri
-  let geocacheFile = "site/geocache.json";
+  // geo reverse cache between builds
+  const geocacheFile = "site/geocache.json";
   try {
     const text = await fs.readFile(geocacheFile, "utf8");
     const obj = JSON.parse(text); for (const k of Object.keys(obj)) geoCache.set(k, obj[k]);
@@ -598,7 +573,7 @@ async function initMap() {
       const key = baseKey(f.name);
       let lon=null, lat=null, when=null, source=null;
 
-      // GPS din media_info
+      // GPS from media_info (if present)
       const media = f.media_info?.metadata;
       if (media?.location) {
         lat = media.location?.latitude ?? null;
@@ -606,35 +581,35 @@ async function initMap() {
         when = media?.time_taken || null;
         if (lat!=null && lon!=null) { viaMedia++; source="media_info"; }
       }
-      // Fallback: deducere din numele fișierului
+      // Fallback: guess from filename
       if (lat==null || lon==null) {
         const g = guessFromFilename(f.name);
         if (g){ [lon,lat]=g; viaGuess++; source = source || "filename"; }
       }
       if (lat==null || lon==null) { skipped++; continue; }
 
-      // Denumire loc (opțional)
+      // Optional reverse-geocode to nice place title
       let placeInfo = null;
       if (ENABLE_NOMINATIM) {
         placeInfo = await reverseGeocode(lat, lon);
         if (placeInfo) viaNom++;
       }
 
-      // Titlu/descriere auto (fallback)
+      // Base titles/blurb
       const autoBaseTitle  = titleFromFilename(f.name);
       const autoPlaceTitle = placeInfo?.niceTitle || autoBaseTitle;
       const autoBlurb      = makeBlurb(autoPlaceTitle, placeInfo?.components);
 
-      // Overrides din content.json (nume sau pattern)
+      // content.json overrides by exact filename or pattern
       const ovFromName    = overrides.byName.get(key) || null;
       const ovFromPattern = overrides.patterns.find(p => p.re.test(key))?.data || null;
       const cuprinsTitle  = (ovFromName?.title || ovFromPattern?.title || "").trim();
       const cuprinsDesc   = (ovFromName?.description || ovFromPattern?.description || "").trim();
 
-      // Linkuri
+      // links
       const { pageUrl, rawUrl } = await filePageAndRaw(dbx, f.path_lower);
 
-      // Thumbnail local (încearcă prin shared_link, apoi prin path)
+      // thumbnail (local)
       let thumbRel = null;
       try {
         const buf = await fetchThumbViaSharedLink(dbx, f.path_lower);
@@ -678,21 +653,21 @@ async function initMap() {
     }
   }
 
-  // salvează cache-ul
+  // save geo reverse cache
   const cacheObj = {}; for (const [k,v] of geoCache.entries()) cacheObj[k]=v;
   await fs.writeFile("site/geocache.json", JSON.stringify(cacheObj, null, 2), "utf8");
 
-  // output
+  // outputs
   const geo = { type: "FeatureCollection", features };
   await fs.writeFile("site/locations.json", JSON.stringify(geo, null, 2), "utf8");
   const html = htmlTemplate({ dataUrl: "locations.json", apiKey: GMAPS_API_KEY });
   await fs.writeFile("site/index.html", html, "utf8");
 
-  console.log(`Am scris ${features.length} elemente -> site/locations.json`);
-  console.log(`  din media_info: ${viaMedia}`);
-  console.log(`  din nume fișier: ${viaGuess}`);
-  if (ENABLE_NOMINATIM) console.log(`  reverse geocode: ${viaNom}`);
-  console.log(`  thumbs locale: ${thumbs}`);
-  console.log(`  imagini externe: ${extLinks}`);
-  console.log(`  sărite: ${skipped}`);
+  console.log(`Wrote ${features.length} features -> site/locations.json`);
+  console.log(`  from EXIF media_info: ${viaMedia}`);
+  console.log(`  from filename guess:  ${viaGuess}`);
+  if (ENABLE_NOMINATIM) console.log(`  reverse geocode:     ${viaNom}`);
+  console.log(`  local thumbs:        ${thumbs}`);
+  console.log(`  external images:     ${extLinks}`);
+  console.log(`  skipped (no coords): ${skipped}`);
 })().catch(e => { console.error(e); process.exit(1); });
