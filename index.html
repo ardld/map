@@ -3,34 +3,34 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Photo Map • Real Romania</title>
+<title>Real Romania • Photo Map</title>
 <style>
-  :root { --left: 380px; --bg:#0b0b0c; --panel:#111317; --text:#eaeef6; --muted:#9aa4b2; }
+  :root { --left: 380px; --bg:#ffffff; --panel:#f6f7f9; --text:#111; --muted:#5a6b7b; --border:#e7eaef; --accent:#2f6fed; }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin:0; background:var(--bg); color:var(--text); font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  html, body { height: 100%; margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   #wrap { display: grid; grid-template-columns: var(--left) 1fr; height: 100%; }
-  #left { background: var(--panel); border-right: 1px solid #22252b; display:flex; flex-direction:column; min-width:0; }
-  #brand { padding: 12px 14px; border-bottom:1px solid #22252b; font-weight:600; letter-spacing:.2px; }
-  #toc { padding: 10px 8px; overflow:auto; flex: 1 1 auto; }
-  .toc-item { padding: 6px 8px; border-radius: 8px; cursor: pointer; display:flex; align-items:center; gap:8px; }
-  .toc-item:hover { background:#1a1e25; }
-  .toc-item.active { background:#1f2630; }
-  .dot { width:8px; height:8px; border-radius:50%; background:#6aa3ff; opacity:.8; }
-  .toc-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #left { background: var(--panel); border-right: 1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
+  #brand { padding: 12px 14px; border-bottom:1px solid var(--border); font-weight:650; letter-spacing:.2px; }
+  #toc { padding: 8px; overflow:auto; flex: 1 1 auto; }
+  .toc-item { padding: 8px 10px; border-radius: 10px; cursor: pointer; display:flex; align-items:center; gap:10px; border:1px solid transparent; }
+  .toc-item:hover { background:#eef3ff; border-color:#dde7ff; }
+  .toc-item.active { background:#e9efff; border-color:#d6e3ff; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); opacity:.85; }
+  .toc-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
   .toc-count { margin-left:auto; color:var(--muted); font-size:12px; }
-  #explain { padding: 12px 14px; border-top:1px solid #22252b; }
-  #explain h3 { margin: 0 0 6px 0; font-size: 16px; }
+  #explain { padding: 14px; border-top:1px solid var(--border); }
+  #explain h3 { margin: 6px 0 0 0; font-size: 16px; }
   #explain p { margin: 0 0 8px 0; color: var(--muted); }
-  #explain .thumb { width: 100%; border-radius:10px; margin-top:8px; display:block; }
+  #explain .thumb { width: 100%; border-radius:12px; margin-top:10px; display:block; border:1px solid var(--border); }
   #map { width: 100%; height: 100%; }
-  /* InfoWindow content */
-  .gm-popup { max-width: 360px; color:#111; }
-  .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:8px; }
+  /* InfoWindow (on map) */
+  .gm-popup { max-width: 360px; }
+  .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:10px; }
   .gm-pager { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
-  .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
-  .gm-count { font-size: 12px; opacity: .7; }
-  .gm-title { font-weight:600; margin:6px 0 2px 0; }
-  .gm-meta { opacity:.7; font-size:12px; }
+  .gm-btn { border: 1px solid #cdd5df; background: #fff; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  .gm-count { font-size: 12px; color:#5a6b7b; }
+  .gm-title { font-weight:650; margin:6px 0 2px 0; }
+  .gm-meta { color:#6b7a88; font-size:12px; }
   /* Lightbox */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
@@ -38,17 +38,16 @@
   #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
   #lightbox .prev { left: 16px; } .#lightbox .next { right: 16px; }
   #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
-  a.inline { color:#9bc2ff; text-decoration:none; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="left">
-    <div id="brand">Real Romania • Photo Map</div>
+    <div id="brand">Real Romania • Cuprins</div>
     <div id="toc" role="navigation" aria-label="Places"></div>
     <div id="explain">
-      <h3>Select a place on the left or a pin on the map</h3>
-      <p>When you pick a place, you’ll see a short travel blurb here and a thumbnail. Click the image for a larger view.</p>
+      <p>Selectează un loc din stânga sau un pin pe hartă.</p>
+      <h3>&nbsp;</h3>
     </div>
   </div>
   <div id="map"></div>
@@ -65,7 +64,6 @@
 
 <script>
 const DATA_URL = 'locations.json?ts=' + Date.now();
-const GMAPS_KEY = 'AIzaSyAsT9RvYBryqFnJJpjEuHbtu1WveVMSoaI';
 </script>
 <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAsT9RvYBryqFnJJpjEuHbtu1WveVMSoaI&callback=initMap" defer async></script>
 <script>
@@ -80,7 +78,9 @@ function groupByCoord(features) {
     const item = {
       title: p.title || "",
       place_title: p.place_title || p.title || "",
+      cuprins_title: p.cuprins_title || "",
       blurb: p.blurb || "",
+      cuprins_desc: p.cuprins_desc || "",
       taken_at: p.taken_at || "",
       thumb: p.thumb || null,
       thumb_external: p.thumb_external || null,
@@ -90,14 +90,19 @@ function groupByCoord(features) {
     if (!by.has(key)) by.set(key, { lat, lng, items: [item] });
     else by.get(key).items.push(item);
   }
-  // derive group title = most frequent place_title in group
+  // prefer cuprins_title for group title
   return Array.from(by.values()).map(g=>{
-    const freq = new Map();
-    for (const it of g.items) freq.set(it.place_title, (freq.get(it.place_title)||0)+1);
-    let bestTitle = "Untitled";
-    let bestCount = -1;
-    for (const [t,c] of freq) if (c>bestCount) { bestTitle=t; bestCount=c; }
-    g.title = bestTitle;
+    const pick = (get) => {
+      const freq = new Map();
+      for (const it of g.items) {
+        const t = get(it) || "";
+        freq.set(t, (freq.get(t)||0)+1);
+      }
+      let best = ""; let bestCount = -1;
+      for (const [t,c] of freq) if (t && c>bestCount) { best=t; bestCount=c; }
+      return best;
+    };
+    g.title = pick(it=>it.cuprins_title) || pick(it=>it.place_title) || "Loc";
     return g;
   });
 }
@@ -142,13 +147,17 @@ function renderExplain(group, idx){
   const it = group.items[currentIndex];
   const ex = left.explain;
   ex.innerHTML = "";
-  const h = document.createElement('h3'); h.textContent = it.place_title || it.title || 'Photo';
-  const p = document.createElement('p');  p.textContent = it.blurb || '';
-  ex.appendChild(h); ex.appendChild(p);
+
+  // DESCRIPTION FIRST
+  const p = document.createElement('p');  p.textContent = it.cuprins_desc || it.blurb || '';
+  const h = document.createElement('h3'); h.textContent = it.cuprins_title || it.place_title || it.title || 'Foto';
+
+  ex.appendChild(p);
+  ex.appendChild(h);
 
   const imgSrc = it.thumb || it.thumb_external || it.full_external;
   if (imgSrc) {
-    const a = document.createElement('a'); a.href="#"; a.className="inline";
+    const a = document.createElement('a'); a.href="#";
     const img = document.createElement('img'); img.className="thumb"; img.alt=it.title||"";
     img.src = imgSrc; attachImgFallback(img, it);
     a.appendChild(img);
@@ -198,7 +207,7 @@ function renderPopup(marker, group, idx) {
                      '<img loading="lazy" class="gm-img" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
                    '</a>' +
                  '</div>') : '') +
-      '<div class="gm-title">'+(it.title||'')+'</div>' +
+      '<div class="gm-title">'+(it.cuprins_title || it.place_title || it.title || '')+'</div>' +
       (it.taken_at ? '<div class="gm-meta">'+it.taken_at+'</div>' : '') +
     '</div>';
 
@@ -211,14 +220,7 @@ function renderPopup(marker, group, idx) {
     const link = document.querySelector('.imglink');
     const img  = document.querySelector('.gm-img');
 
-    if (img) {
-      img.onerror = ()=> {
-        const alt = toggleDropboxParam(img.src);
-        if (alt !== img.src) { img.src = alt; return; }
-        if (it.full_external && img.src !== it.full_external) { img.src = it.full_external; return; }
-        if (it.thumb_external && img.src !== it.thumb_external) { img.src = it.thumb_external; return; }
-      };
-    }
+    if (img) attachImgFallback(img, it);
     if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, group, i-1); renderExplain(group, i-1); };
     if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, group, i+1); renderExplain(group, i+1); };
     if (link) link.onclick = (e)=>{ e.preventDefault(); openLightbox(group, i); };
@@ -233,8 +235,8 @@ function buildTOC(groups) {
     const item = document.createElement('div');
     item.className = 'toc-item';
     const dot = document.createElement('div'); dot.className = 'dot';
-    const title = document.createElement('div'); title.className = 'toc-title'; title.textContent = g.title || ('Location ' + (idx+1));
-    const count = document.createElement('div'); count.className = 'toc-count'; count.textContent = g.items.length + ' photo' + (g.items.length>1?'s':'');
+    const title = document.createElement('div'); title.className = 'toc-title'; title.textContent = g.title || ('Loc ' + (idx+1));
+    const count = document.createElement('div'); count.className = 'toc-count'; count.textContent = g.items.length + ' foto' + (g.items.length>1?'s':'');
     item.appendChild(dot); item.appendChild(title); item.appendChild(count);
     item.onclick = ()=>{
       document.querySelectorAll('.toc-item').forEach(el=>el.classList.remove('active'));
@@ -249,6 +251,7 @@ function buildTOC(groups) {
 }
 
 async function initMap() {
+  // sidebar refs
   left.toc = document.getElementById('toc');
   left.explain = document.getElementById('explain');
   left.lightbox = document.getElementById('lightbox');
