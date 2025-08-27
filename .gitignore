@@ -1,0 +1,4 @@
+node_modules
+public/photos.geojson
+.vercel
+.DS_Store
