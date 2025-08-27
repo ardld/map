@@ -6,26 +6,37 @@ import crypto from "node:crypto";
 
 /* === Config (env) === */
 const RAW_TOKEN    = process.env.DROPBOX_TOKEN;            // optional (short-lived)
-const REFRESH      = process.env.DROPBOX_REFRESH_TOKEN;     // preferred
+const REFRESH      = process.env.DROPBOX_REFRESH_TOKEN;     // preferred long-lived
 const APP_KEY      = process.env.DROPBOX_APP_KEY;
 const APP_SECRET   = process.env.DROPBOX_APP_SECRET;
 const SHARED_URL   = process.env.DROPBOX_SHARED_URL;
-const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "AIzaSyAsT9RvYBryqFnJJpjEuHbtu1WveVMSoaI";
+const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "";
 const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1";
+const NOMINATIM_EMAIL  = process.env.NOMINATIM_EMAIL || "";
+const NOMI_THROTTLE = parseInt(process.env.NOMINATIM_THROTTLE_MS || "1100", 10);
 
 if (!SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
 
 /* === Auth: prefer refresh flow (never expires), else raw token === */
 async function fetchAccessTokenViaRefresh() {
   if (!REFRESH || !APP_KEY || !APP_SECRET) return null;
-  const form = new URLSearchParams({ grant_type: "refresh_token", refresh_token: REFRESH });
+  const form = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: REFRESH
+  });
   const auth = Buffer.from(`${APP_KEY}:${APP_SECRET}`).toString("base64");
   const r = await fetch("https://api.dropboxapi.com/oauth2/token", {
     method: "POST",
-    headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
     body: form
   });
-  if (!r.ok) throw new Error(`Dropbox refresh failed: ${r.status} ${await r.text().catch(()=> "")}`);
+  if (!r.ok) {
+    const body = await r.text().catch(()=> "");
+    throw new Error(`Dropbox refresh failed: ${r.status} ${body}`);
+  }
   const j = await r.json();
   return j.access_token;
 }
@@ -51,6 +62,7 @@ const isImage = n => IMAGE_EXTS.some(ext => (n||"").toLowerCase().endsWith(ext))
 const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
 const md5  = s => crypto.createHash("md5").update(s).digest("hex");
 const esc  = s => String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* Tiny RO gazetteer [lon,lat] for filename guesses */
 const GAZ = {
@@ -73,7 +85,7 @@ const guessFromFilename = (name="") => {
   return keys.length ? GAZ[keys[0]] : null;
 };
 
-/* === Dropbox ops === */
+/* === Dropbox list === */
 async function listAll(dbx){
   const shared_link = { url: SHARED_URL };
   const files = [], queue = [""];
@@ -97,21 +109,8 @@ async function listAll(dbx){
   }
   return files;
 }
-async function listAllWithRetry(){
-  try {
-    const dbx = await makeDbx();
-    return await listAll(dbx);
-  } catch (e) {
-    if (e?.status === 401 && REFRESH && APP_KEY && APP_SECRET) {
-      console.warn("Token expired; refreshing and retrying once…");
-      const dbx2 = await makeDbx();
-      return await listAll(dbx2);
-    }
-    throw e;
-  }
-}
 
-/* Build a page URL + raw ?raw=1 URL from the folder shared link */
+/* === File links & thumbnails === */
 async function filePageAndRaw(dbx, subpathLower){
   try{
     const meta = await dbx.sharingGetSharedLinkMetadata({ url: SHARED_URL, path: subpathLower });
@@ -123,8 +122,6 @@ async function filePageAndRaw(dbx, subpathLower){
     return { pageUrl: null, rawUrl: null };
   }
 }
-
-/* Try A: thumbnail via SHARED LINK */
 async function fetchThumbViaSharedLink(dbx, subpathLower){
   const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
   const arg = {
@@ -145,8 +142,6 @@ async function fetchThumbViaSharedLink(dbx, subpathLower){
   if(!r.ok) throw new Error(`thumb(shared_link) ${r.status}`);
   return Buffer.from(await r.arrayBuffer());
 }
-
-/* Try B: thumbnail via ID or path (best-effort) */
 async function fetchThumbViaIdOrPath(dbx, idOrPath){
   const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
   const arg = {
@@ -168,36 +163,118 @@ async function fetchThumbViaIdOrPath(dbx, idOrPath){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML (default cluster click-to-zoom, popup+lightbox prev/next, robust fallbacks) === */
+/* === Optional reverse geocoding (once per lat,lng) === */
+const geoCache = new Map(); // key "lat,lng" -> { titleParts, niceTitle }
+async function reverseGeocode(lat, lng){
+  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  if (geoCache.has(key)) return geoCache.get(key);
+
+  if (!ENABLE_NOMINATIM) { geoCache.set(key,null); return null; }
+
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lng));
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("zoom", "14");
+  if (NOMINATIM_EMAIL) url.searchParams.set("email", NOMINATIM_EMAIL);
+
+  await sleep(NOMI_THROTTLE); // be nice to the service
+  const r = await fetch(url.toString(), {
+    headers: { "User-Agent": "RealRomania-PhotoMap/1.0 (+github-pages)" }
+  });
+  if (!r.ok) { geoCache.set(key,null); return null; }
+  const j = await r.json().catch(()=>null);
+  if (!j) { geoCache.set(key,null); return null; }
+
+  const addr = j.address || {};
+  const name =
+    j.name ||
+    addr.tourism || addr.historic || addr.leisure || addr.natural ||
+    addr.village || addr.town || addr.city || addr.suburb || addr.hamlet ||
+    addr.county || addr.state || "Romania";
+
+  const county = addr.county || "";
+  const state  = addr.state  || "";
+  const country= addr.country || "Romania";
+
+  // Prefer "Name, County" or "Name, State"
+  const niceTitle = county && name ? `${name}, ${county}` :
+                    state  && name ? `${name}, ${state}`  :
+                    `${name}, ${country}`;
+
+  const info = { niceTitle, components: addr, display_name: j.display_name || "" };
+  geoCache.set(key, info);
+  return info;
+}
+
+/* === Tourism copy generator (short & neutral) === */
+function makeBlurb(niceTitle, components) {
+  const area = components?.county || components?.state || "Romania";
+  return `${niceTitle} is a photogenic spot in ${area}, where travelers can pause for views and local color. It’s an easy add to a Romania itinerary—come for a stroll, a photo, and a dose of atmosphere.`;
+}
+function titleFromFilename(name) {
+  const base = name.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').trim();
+  const words = base.split(/\s+/).map(w=>w[0]?w[0].toUpperCase()+w.slice(1):w);
+  return words.join(' ');
+}
+
+/* === HTML template: two-column layout (left TOC + explanation, right map), NO CLUSTERS === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Photo Map • Google Maps</title>
+<title>Photo Map • Real Romania</title>
 <style>
-  html, body, #map { height: 100%; margin: 0; }
-  .gm-popup { max-width: 360px; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .gm-popup .imgwrap { position: relative; }
-  .gm-popup img { width: 100%; height: auto; display: block; border-radius: 8px; }
-  .gm-title { font-weight: 600; margin: 6px 0 2px 0; }
-  .gm-meta { opacity: .7; font-size: 12px; }
-  .gm-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+  :root { --left: 380px; --bg:#0b0b0c; --panel:#111317; --text:#eaeef6; --muted:#9aa4b2; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin:0; background:var(--bg); color:var(--text); font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #wrap { display: grid; grid-template-columns: var(--left) 1fr; height: 100%; }
+  #left { background: var(--panel); border-right: 1px solid #22252b; display:flex; flex-direction:column; min-width:0; }
+  #brand { padding: 12px 14px; border-bottom:1px solid #22252b; font-weight:600; letter-spacing:.2px; }
+  #toc { padding: 10px 8px; overflow:auto; flex: 1 1 auto; }
+  .toc-item { padding: 6px 8px; border-radius: 8px; cursor: pointer; display:flex; align-items:center; gap:8px; }
+  .toc-item:hover { background:#1a1e25; }
+  .toc-item.active { background:#1f2630; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#6aa3ff; opacity:.8; }
+  .toc-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .toc-count { margin-left:auto; color:var(--muted); font-size:12px; }
+  #explain { padding: 12px 14px; border-top:1px solid #22252b; }
+  #explain h3 { margin: 0 0 6px 0; font-size: 16px; }
+  #explain p { margin: 0 0 8px 0; color: var(--muted); }
+  #explain .thumb { width: 100%; border-radius:10px; margin-top:8px; display:block; }
+  #map { width: 100%; height: 100%; }
+  /* InfoWindow content */
+  .gm-popup { max-width: 360px; color:#111; }
+  .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:8px; }
+  .gm-pager { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
   .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
   .gm-count { font-size: 12px; opacity: .7; }
+  .gm-title { font-weight:600; margin:6px 0 2px 0; }
+  .gm-meta { opacity:.7; font-size:12px; }
   /* Lightbox */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
   #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
   #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
-  #lightbox .prev { left: 16px; }
-  #lightbox .next { right: 16px; }
+  #lightbox .prev { left: 16px; } .#lightbox .next { right: 16px; }
   #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
+  a.inline { color:#9bc2ff; text-decoration:none; }
 </style>
 </head>
 <body>
-<div id="map"></div>
+<div id="wrap">
+  <div id="left">
+    <div id="brand">Real Romania • Photo Map</div>
+    <div id="toc" role="navigation" aria-label="Places"></div>
+    <div id="explain">
+      <h3>Select a place on the left or a pin on the map</h3>
+      <p>When you pick a place, you’ll see a short travel blurb here and a thumbnail. Click the image for a larger view.</p>
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
 
 <!-- Lightbox -->
 <div id="lightbox" aria-modal="true" role="dialog">
@@ -208,29 +285,43 @@ function htmlTemplate({ dataUrl, apiKey }){
   <div class="counter"></div>
 </div>
 
-<script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
-const MAX_INIT_ZOOM = 8; // initial fit cap
-
+const DATA_URL = '${dataUrl}?ts=' + Date.now();
+const GMAPS_KEY = '${apiKey}';
+</script>
+<script src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap" defer async></script>
+<script>
 function groupByCoord(features) {
   const by = new Map();
   for (const f of features) {
     const c = f.geometry?.coordinates;
     const p = f.properties || {};
     if (!c || c.length < 2) continue;
-    const lat = c[1], lng = c[0];
+    const lat = +c[1], lng = +c[0];
     const key = lat.toFixed(5) + "," + lng.toFixed(5);
     const item = {
       title: p.title || "",
+      place_title: p.place_title || p.title || "",
+      blurb: p.blurb || "",
       taken_at: p.taken_at || "",
       thumb: p.thumb || null,
       thumb_external: p.thumb_external || null,
-      full_external: p.full_external || p.thumb_external || p.thumb || null
+      full_external: p.full_external || p.thumb_external || p.thumb || null,
+      lat, lng
     };
     if (!by.has(key)) by.set(key, { lat, lng, items: [item] });
     else by.get(key).items.push(item);
   }
-  return Array.from(by.values());
+  // derive group title = most frequent place_title in group
+  return Array.from(by.values()).map(g=>{
+    const freq = new Map();
+    for (const it of g.items) freq.set(it.place_title, (freq.get(it.place_title)||0)+1);
+    let bestTitle = "Untitled";
+    let bestCount = -1;
+    for (const [t,c] of freq) if (c>bestCount) { bestTitle=t; bestCount=c; }
+    g.title = bestTitle;
+    return g;
+  });
 }
 function toggleDropboxParam(u){
   try{
@@ -247,150 +338,217 @@ function toggleDropboxParam(u){
   return u;
 }
 
+let map, info;
+let groups = [];
+let markers = [];
+let currentGroup = null;
+let currentIndex = 0;
+
+const left = {
+  toc: null,
+  explain: null,
+  lightbox: null,
+  lbImg: null, lbClose: null, lbPrev: null, lbNext: null, lbCount: null,
+};
+
+function attachImgFallback(imgEl, it){
+  imgEl.addEventListener('error', () => {
+    const alt = toggleDropboxParam(imgEl.src);
+    if (alt !== imgEl.src) { imgEl.src = alt; return; }
+    if (it.full_external && imgEl.src !== it.full_external) { imgEl.src = it.full_external; return; }
+    if (it.thumb_external && imgEl.src !== it.thumb_external) { imgEl.src = it.thumb_external; return; }
+  });
+}
+function renderExplain(group, idx){
+  currentGroup = group; currentIndex = ((idx % group.items.length)+group.items.length)%group.items.length;
+  const it = group.items[currentIndex];
+  const ex = left.explain;
+  ex.innerHTML = "";
+  const h = document.createElement('h3'); h.textContent = it.place_title || it.title || 'Photo';
+  const p = document.createElement('p');  p.textContent = it.blurb || '';
+  ex.appendChild(h); ex.appendChild(p);
+
+  const imgSrc = it.thumb || it.thumb_external || it.full_external;
+  if (imgSrc) {
+    const a = document.createElement('a'); a.href="#"; a.className="inline";
+    const img = document.createElement('img'); img.className="thumb"; img.alt=it.title||"";
+    img.src = imgSrc; attachImgFallback(img, it);
+    a.appendChild(img);
+    a.onclick = (e)=>{ e.preventDefault(); openLightbox(group, currentIndex); };
+    ex.appendChild(a);
+  }
+}
+function openLightbox(group, index) {
+  currentGroup = group; currentIndex = ((index % group.items.length)+group.items.length)%group.items.length;
+  const n = group.items.length; const it = group.items[currentIndex];
+  const src = it.full_external || it.thumb_external || it.thumb;
+  left.lightbox.style.display='flex';
+  left.lbImg.src = src || "";
+  left.lbCount.textContent = (n>1) ? ( (currentIndex+1)+" / "+n ) : "";
+  left.lbPrev.style.display = (n>1) ? "block" : "none";
+  left.lbNext.style.display = (n>1) ? "block" : "none";
+  left.lbImg.onerror = ()=> {
+    const alt = toggleDropboxParam(left.lbImg.src);
+    if (alt !== left.lbImg.src) { left.lbImg.src = alt; return; }
+    if (it.thumb_external && left.lbImg.src !== it.thumb_external) { left.lbImg.src = it.thumb_external; return; }
+  };
+}
+function closeLightbox(){ left.lightbox.style.display='none'; left.lbImg.src=""; }
+function stepLightbox(delta){
+  if (!currentGroup) return;
+  const n = currentGroup.items.length;
+  currentIndex = ((currentIndex + delta) % n + n) % n;
+  openLightbox(currentGroup, currentIndex);
+}
+
+function renderPopup(marker, group, idx) {
+  const n = group.items.length;
+  const i = ((idx % n) + n) % n;
+  const it = group.items[i];
+  const imgSrc = it.thumb || it.thumb_external || null;
+  const html =
+    '<div class="gm-popup" data-idx="'+i+'">' +
+      (n>1 ? (
+        '<div class="gm-pager">' +
+          '<button class="gm-btn gm-prev" aria-label="Previous">‹ Prev</button>' +
+          '<span class="gm-count">'+(i+1)+' / '+n+'</span>' +
+          '<button class="gm-btn gm-next" aria-label="Next">Next ›</button>' +
+        '</div>'
+      ) : '') +
+      (imgSrc ? ('<div class="imgwrap">' +
+                   '<a href="#" class="imglink" data-idx="'+i+'">' +
+                     '<img loading="lazy" class="gm-img" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
+                   '</a>' +
+                 '</div>') : '') +
+      '<div class="gm-title">'+(it.title||'')+'</div>' +
+      (it.taken_at ? '<div class="gm-meta">'+it.taken_at+'</div>' : '') +
+    '</div>';
+
+  info.setContent(html);
+  info.open({ anchor: marker, map });
+
+  google.maps.event.addListenerOnce(info, 'domready', () => {
+    const prev = document.querySelector('.gm-prev');
+    const next = document.querySelector('.gm-next');
+    const link = document.querySelector('.imglink');
+    const img  = document.querySelector('.gm-img');
+
+    if (img) {
+      img.onerror = ()=> {
+        const alt = toggleDropboxParam(img.src);
+        if (alt !== img.src) { img.src = alt; return; }
+        if (it.full_external && img.src !== it.full_external) { img.src = it.full_external; return; }
+        if (it.thumb_external && img.src !== it.thumb_external) { img.src = it.thumb_external; return; }
+      };
+    }
+    if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, group, i-1); renderExplain(group, i-1); };
+    if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, group, i+1); renderExplain(group, i+1); };
+    if (link) link.onclick = (e)=>{ e.preventDefault(); openLightbox(group, i); };
+  });
+
+  renderExplain(group, i);
+}
+
+function buildTOC(groups) {
+  const toc = left.toc; toc.innerHTML = "";
+  groups.forEach((g, idx)=>{
+    const item = document.createElement('div');
+    item.className = 'toc-item';
+    const dot = document.createElement('div'); dot.className = 'dot';
+    const title = document.createElement('div'); title.className = 'toc-title'; title.textContent = g.title || ('Location ' + (idx+1));
+    const count = document.createElement('div'); count.className = 'toc-count'; count.textContent = g.items.length + ' photo' + (g.items.length>1?'s':'');
+    item.appendChild(dot); item.appendChild(title); item.appendChild(count);
+    item.onclick = ()=>{
+      document.querySelectorAll('.toc-item').forEach(el=>el.classList.remove('active'));
+      item.classList.add('active');
+      const m = markers[idx];
+      map.panTo({ lat: g.lat, lng: g.lng });
+      map.setZoom(Math.max(map.getZoom(), 10));
+      google.maps.event.trigger(m, 'click');
+    };
+    toc.appendChild(item);
+  });
+}
+
 async function initMap() {
-  const map = new google.maps.Map(document.getElementById('map'), {
+  left.toc = document.getElementById('toc');
+  left.explain = document.getElementById('explain');
+  left.lightbox = document.getElementById('lightbox');
+  left.lbImg = left.lightbox.querySelector('img');
+  left.lbClose = left.lightbox.querySelector('.close');
+  left.lbPrev = left.lightbox.querySelector('.prev');
+  left.lbNext = left.lightbox.querySelector('.next');
+  left.lbCount = left.lightbox.querySelector('.counter');
+
+  left.lbClose.onclick = closeLightbox;
+  left.lightbox.addEventListener('click', (e)=>{ if(e.target===left.lightbox) closeLightbox(); });
+  left.lbPrev.onclick = (e)=>{ e.preventDefault(); stepLightbox(-1); };
+  left.lbNext.onclick = (e)=>{ e.preventDefault(); stepLightbox(1); };
+  document.addEventListener('keydown', (e)=>{
+    if (left.lightbox.style.display === 'flex') {
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); stepLightbox(-1); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); stepLightbox(1); }
+    }
+  });
+
+  map = new google.maps.Map(document.getElementById('map'), {
     center: { lat: 45.94, lng: 25.0 },
     zoom: 6,
-    mapTypeControl: false
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: false
   });
-
-  const info = new google.maps.InfoWindow(); // exactly one open at a time
-
-  // Lightbox state & helpers
-  const lb = document.getElementById('lightbox');
-  const lbImg = lb.querySelector('img');
-  const lbClose = lb.querySelector('.close');
-  const lbPrev = lb.querySelector('.prev');
-  const lbNext = lb.querySelector('.next');
-  const lbCount = lb.querySelector('.counter');
-  let lbState = null; // { group, index }
-
-  function renderLightbox() {
-    if (!lbState) return;
-    const g = lbState.group;
-    const n = g.items.length;
-    const i = ((lbState.index % n) + n) % n;
-    lbState.index = i;
-    const it = g.items[i];
-    const src = it.full_external || it.thumb_external || it.thumb;
-    lbImg.src = src || "";
-    lbCount.textContent = (n > 1) ? ( (i+1) + " / " + n ) : "";
-    lbPrev.style.display = (n > 1) ? "block" : "none";
-    lbNext.style.display = (n > 1) ? "block" : "none";
-    lbImg.onerror = () => {
-      const alt = toggleDropboxParam(lbImg.src);
-      if (alt !== lbImg.src) { lbImg.src = alt; return; }
-      if (it.thumb_external && lbImg.src !== it.thumb_external) { lbImg.src = it.thumb_external; return; }
-    };
-  }
-  function openLightbox(group, index) { lbState = { group, index }; renderLightbox(); lb.style.display = 'flex'; }
-  function closeLightbox() { lb.style.display = 'none'; lbImg.src = ''; lbState = null; }
-  lb.addEventListener('click', (e)=>{ if(e.target===lb || e.target===lbClose) closeLightbox(); });
-  lbPrev.addEventListener('click', (e)=>{ e.preventDefault(); if(lbState){ lbState.index--; renderLightbox(); }});
-  lbNext.addEventListener('click', (e)=>{ e.preventDefault(); if(lbState){ lbState.index++; renderLightbox(); }});
-  document.addEventListener('keydown', (e)=>{
-    if (lb.style.display === 'flex') {
-      if (e.key === 'Escape') closeLightbox();
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); if(lbState){ lbState.index--; renderLightbox(); } }
-      if (e.key === 'ArrowRight') { e.preventDefault(); if(lbState){ lbState.index++; renderLightbox(); } }
-    }
-  });
+  info = new google.maps.InfoWindow();
 
   try {
-    const res = await fetch('${dataUrl}?ts=' + Date.now());
+    const res = await fetch(DATA_URL);
     const geo = await res.json();
-    const groups = groupByCoord(geo.features || []);
-    const markers = [];
+    groups = groupByCoord(geo.features || []);
+    markers = [];
 
-    function attachImgFallback(imgEl, it){
-      imgEl.addEventListener('error', () => {
-        const alt = toggleDropboxParam(imgEl.src);
-        if (alt !== imgEl.src) { imgEl.src = alt; return; }
-        if (it.full_external && imgEl.src !== it.full_external) { imgEl.src = it.full_external; return; }
-        if (it.thumb_external && imgEl.src !== it.thumb_external) { imgEl.src = it.thumb_external; return; }
-      });
-    }
-
-    function renderPopup(marker, g, idx) {
-      const n = g.items.length;
-      const i = ((idx % n) + n) % n;
-      const it = g.items[i];
-      const imgSrc = it.thumb || it.thumb_external || null;
-      const html =
-        '<div class="gm-popup" data-idx="'+i+'">' +
-          (n>1 ? (
-            '<div class="gm-pager">' +
-              '<button class="gm-btn gm-prev" aria-label="Previous">‹ Prev</button>' +
-              '<span class="gm-count">'+(i+1)+' / '+n+'</span>' +
-              '<button class="gm-btn gm-next" aria-label="Next">Next ›</button>' +
-            '</div>'
-          ) : '') +
-          (imgSrc ? ('<div class="imgwrap">' +
-                       '<a href="#" class="imglink" data-idx="'+i+'">' +
-                         '<img loading="lazy" class="gm-img" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
-                       '</a>' +
-                     '</div>') : '') +
-          '<div class="gm-title">'+(it.title||'')+'</div>' +
-          (it.taken_at ? '<div class="gm-meta">'+it.taken_at+'</div>' : '') +
-        '</div>';
-
-      info.setContent(html);
-      info.open({ anchor: marker, map });
-
-      google.maps.event.addListenerOnce(info, 'domready', () => {
-        const prev = document.querySelector('.gm-prev');
-        const next = document.querySelector('.gm-next');
-        const link = document.querySelector('.imglink');
-        const img  = document.querySelector('.gm-img');
-
-        if (img) attachImgFallback(img, it);
-        if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i-1); };
-        if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i+1); };
-        if (link) link.onclick = (e)=>{ e.preventDefault(); openLightbox(g, i); };
-      });
-    }
-
-    // One marker per grouped coordinate
+    // markers (NO clusters)
     for (const g of groups) {
       const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
       m.addListener('click', () => renderPopup(m, g, 0));
       markers.push(m);
     }
+    markers.forEach(m=>m.setMap(map));
 
-    // CLUSTERS: use default click behavior (zoom into the cluster)
-    new markerClusterer.MarkerClusterer({ map, markers });
-
-    // Initial fit to all markers, capped at MAX_INIT_ZOOM
+    // Initial fit to all markers
     if (markers.length) {
       const b = new google.maps.LatLngBounds();
       markers.forEach(m => b.extend(m.getPosition()));
       map.fitBounds(b);
       google.maps.event.addListenerOnce(map, 'idle', () => {
-        if (map.getZoom() > MAX_INIT_ZOOM) map.setZoom(MAX_INIT_ZOOM);
+        if (map.getZoom() > 8) map.setZoom(8);
       });
     }
+
+    buildTOC(groups);
   } catch (e) {
     console.error('Failed to load data', e);
   }
 }
 </script>
-<script src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap" defer async></script>
 </body>
 </html>`;
 }
 
-/* === Build === */
+/* === BUILD: list Dropbox, derive GPS, make thumbs, reverse geocode (optional), write JSON & HTML === */
 (async () => {
   console.log("Listing Dropbox shared folder…");
-  let dbx = await makeDbx();
+  let dbx;
+  try {
+    dbx = await makeDbx();
+  } catch (e) { console.error(e); process.exit(1); }
 
-  // list with refresh retry
   let entries;
   try {
     entries = await listAll(dbx);
   } catch (e) {
     if (e?.status === 401 && REFRESH && APP_KEY && APP_SECRET) {
-      console.warn("Access token expired mid-list; refreshing and retrying…");
+      console.warn("Access token expired; refreshing and retrying…");
       dbx = await makeDbx();
       entries = await listAll(dbx);
     } else {
@@ -398,19 +556,24 @@ async function initMap() {
     }
   }
 
-  console.log(`Found ${entries.length} images.`);
-
+  console.log(`Found ${entries.length} image files.`);
   await fs.mkdir("site", { recursive: true });
   await fs.mkdir("site/thumbs", { recursive: true });
 
   let viaMedia=0, viaGuess=0, viaNom=0, thumbs=0, extLinks=0, skipped=0;
   const features = [];
 
+  // reverse geocode cache persisted between runs
+  let geocacheFile = "site/geocache.json";
+  try {
+    const text = await fs.readFile(geocacheFile, "utf8");
+    const obj = JSON.parse(text); for (const k of Object.keys(obj)) geoCache.set(k, obj[k]);
+  } catch {}
+
   for (const f of entries) {
     try {
       let lon=null, lat=null, when=null, source=null;
 
-      // 1) GPS via media_info
       const media = f.media_info?.metadata;
       if (media?.location) {
         lat = media.location?.latitude ?? null;
@@ -418,35 +581,29 @@ async function initMap() {
         when = media?.time_taken || null;
         if (lat!=null && lon!=null) { viaMedia++; source="media_info"; }
       }
-
-      // 2) Filename guess
       if (lat==null || lon==null) {
         const g = guessFromFilename(f.name);
         if (g){ [lon,lat]=g; viaGuess++; source = source || "filename"; }
       }
 
-      // 3) Optional Nominatim
-      if ((lat==null || lon==null) && ENABLE_NOMINATIM) {
-        const urlName = f.name.replace(/\.[^.]+$/,"").replace(/[_\-.]+/g," ").trim();
-        try{
-          const u = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(urlName)}&format=jsonv2&limit=1`;
-          const r = await fetch(u, { headers:{ "User-Agent":"RealRomania-PhotoMap/1.0" } });
-          if (r.ok) {
-            const d = await r.json();
-            if (Array.isArray(d) && d.length) {
-              [lon,lat] = [parseFloat(d[0].lon), parseFloat(d[0].lat)];
-              viaNom++; source = source || "nominatim";
-            }
-          }
-        }catch{}
-      }
-
+      // If we still don't have coords, skip
       if (lat==null || lon==null) { skipped++; continue; }
 
-      // Per-file links
+      // Place naming via reverse geocode (optional)
+      let placeInfo = null;
+      if (ENABLE_NOMINATIM) {
+        placeInfo = await reverseGeocode(lat, lon);
+        if (placeInfo) viaNom++;
+      }
+
+      const baseTitle = titleFromFilename(f.name);
+      const placeTitle = placeInfo?.niceTitle || baseTitle;
+      const blurb = makeBlurb(placeTitle, placeInfo?.components);
+
+      // Links
       const { pageUrl, rawUrl } = await filePageAndRaw(dbx, f.path_lower);
 
-      // Try local thumbnail (A then B)
+      // Thumbnails (try A then B)
       let thumbRel = null;
       try {
         const buf = await fetchThumbViaSharedLink(dbx, f.path_lower);
@@ -464,30 +621,36 @@ async function initMap() {
           thumbs++;
         } catch {}
       }
-
-      // External raw fallback for <img> and lightbox
       let thumbExternal = null;
       if (!thumbRel && rawUrl) { thumbExternal = rawUrl; extLinks++; }
 
       features.push({
         type: "Feature",
         properties: {
-          title: esc(f.name),
+          title: esc(baseTitle),
+          place_title: esc(placeTitle),
+          blurb: esc(blurb),
           taken_at: when,
           source,
           original_page: pageUrl,
-          thumb: thumbRel,               // local thumbnail
-          thumb_external: thumbExternal, // fallback for <img>
-          full_external: rawUrl          // larger image for lightbox
+          thumb: thumbRel,
+          thumb_external: thumbExternal,
+          full_external: rawUrl
         },
         geometry: { type: "Point", coordinates: [lon, lat] }
       });
 
-    } catch {
+    } catch (err) {
       skipped++;
     }
   }
 
+  // Persist geocache
+  const cacheObj = {};
+  for (const [k,v] of geoCache.entries()) cacheObj[k] = v;
+  await fs.writeFile("site/geocache.json", JSON.stringify(cacheObj, null, 2), "utf8");
+
+  // Write outputs
   const geo = { type: "FeatureCollection", features };
   await fs.writeFile("site/locations.json", JSON.stringify(geo, null, 2), "utf8");
   const html = htmlTemplate({ dataUrl: "locations.json", apiKey: GMAPS_API_KEY });
@@ -496,7 +659,7 @@ async function initMap() {
   console.log(`Wrote ${features.length} features -> site/locations.json`);
   console.log(`  via media_info: ${viaMedia}`);
   console.log(`  via filename:   ${viaGuess}`);
-  if (ENABLE_NOMINATIM) console.log(`  via Nominatim:  ${viaNom}`);
+  if (ENABLE_NOMINATIM) console.log(`  via reverse geocode: ${viaNom}`);
   console.log(`  local thumbs:   ${thumbs}`);
   console.log(`  external imgs:  ${extLinks}`);
   console.log(`  skipped:        ${skipped}`);
