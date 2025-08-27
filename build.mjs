@@ -4,70 +4,45 @@ import path from "path";
 import fetch from "node-fetch";
 import crypto from "node:crypto";
 
-/* === Config === */
-let ACCESS_TOKEN = process.env.DROPBOX_TOKEN || null;
-const DROPBOX_REFRESH_TOKEN = process.env.DROPBOX_REFRESH_TOKEN || null;
-const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY || null;
-const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET || null;
-
-const DROPBOX_SHARED_URL = process.env.DROPBOX_SHARED_URL;
-const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "";
+/* === Config (env) === */
+const RAW_TOKEN    = process.env.DROPBOX_TOKEN;
+const REFRESH      = process.env.DROPBOX_REFRESH_TOKEN;
+const APP_KEY      = process.env.DROPBOX_APP_KEY;
+const APP_SECRET   = process.env.DROPBOX_APP_SECRET;
+const SHARED_URL   = process.env.DROPBOX_SHARED_URL;
+const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "AIzaSyAsT9RvYBryqFnJJpjEuHbtu1WveVMSoaI";
 const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1";
 
-if (!DROPBOX_SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
-if (!GMAPS_API_KEY) console.warn("Warning: GMAPS_API_KEY missing; map may fail to load");
+if (!SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
 
-/* === Token minting (refresh flow) === */
-async function mintAccessTokenViaRefresh() {
-  if (!(DROPBOX_REFRESH_TOKEN && DROPBOX_APP_KEY && DROPBOX_APP_SECRET)) return null;
-
-  const body = new URLSearchParams();
-  body.set("grant_type", "refresh_token");
-  body.set("refresh_token", DROPBOX_REFRESH_TOKEN);
-
-  // Prefer HTTP Basic auth per Dropbox docs
-  const basic = Buffer.from(`${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}`).toString("base64");
+/* === Auth === */
+async function fetchAccessTokenViaRefresh() {
+  if (!REFRESH || !APP_KEY || !APP_SECRET) return null;
+  const form = new URLSearchParams({ grant_type: "refresh_token", refresh_token: REFRESH });
+  const auth = Buffer.from(`${APP_KEY}:${APP_SECRET}`).toString("base64");
   const r = await fetch("https://api.dropboxapi.com/oauth2/token", {
     method: "POST",
-    headers: {
-      "Authorization": `Basic ${basic}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body
+    headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: form
   });
-  if (!r.ok) {
-    const t = await r.text().catch(()=>"");
-    throw new Error(`Failed to refresh Dropbox token (${r.status}): ${t}`);
-  }
+  if (!r.ok) throw new Error(`Dropbox refresh failed: ${r.status} ${await r.text().catch(()=> "")}`);
   const j = await r.json();
   return j.access_token;
 }
-
-async function ensureAccessToken() {
-  if (ACCESS_TOKEN) return ACCESS_TOKEN;
-  const fresh = await mintAccessTokenViaRefresh();
-  if (!fresh) throw new Error("No Dropbox token available. Set DROPBOX_TOKEN or refresh trio (DROPBOX_REFRESH_TOKEN + DROPBOX_APP_KEY + DROPBOX_APP_SECRET).");
-  ACCESS_TOKEN = fresh;
-  return ACCESS_TOKEN;
+async function getAccessToken() {
+  if (REFRESH && APP_KEY && APP_SECRET) {
+    console.log("Using Dropbox token via refresh flow.");
+    return await fetchAccessTokenViaRefresh();
+  }
+  if (RAW_TOKEN) {
+    console.log("Using provided DROPBOX_TOKEN (may expire).");
+    return RAW_TOKEN;
+  }
+  throw new Error("Provide refresh creds or a DROPBOX_TOKEN.");
 }
-
-/* === Dropbox client + 401 retry helper === */
-let dbx = null;
-async function initDbx() {
-  const tok = await ensureAccessToken();
-  dbx = new Dropbox({ accessToken: tok, fetch });
-}
-
-async function refreshAndReinitIfPossible() {
-  if (!(DROPBOX_REFRESH_TOKEN && DROPBOX_APP_KEY && DROPBOX_APP_SECRET)) return false;
-  const fresh = await mintAccessTokenViaRefresh();
-  ACCESS_TOKEN = fresh;
-  dbx = new Dropbox({ accessToken: ACCESS_TOKEN, fetch });
-  return true;
-}
-
-function is401(e) {
-  return e && (e.status === 401 || e?.error?.error?.[".tag"] === "expired_access_token");
+async function makeDbx() {
+  const token = await getAccessToken();
+  return new Dropbox({ accessToken: token, fetch });
 }
 
 /* === Helpers === */
@@ -98,135 +73,74 @@ const guessFromFilename = (name="") => {
   return keys.length ? GAZ[keys[0]] : null;
 };
 
-/* === Dropbox ops with 401 retry === */
-async function listAll(sharedUrl){
-  const attempt = async () => {
-    const shared_link = { url: sharedUrl };
-    const files = [], queue = [""];
-    let res = await dbx.filesListFolder({ path: "", shared_link, include_media_info: true });
+/* === Dropbox ops === */
+async function listAll(dbx){
+  const shared_link = { url: SHARED_URL };
+  const files = [], queue = [""];
+  while(queue.length){
+    const folder = queue.shift();
+    const res = await dbx.filesListFolder({ path: folder, shared_link, include_media_info: true });
     let data = res.result;
-
     for(const e of data.entries){
       if(e[".tag"]==="folder") queue.push(e.path_lower);
       else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
     }
-    while(queue.length){
-      const folder = queue.shift();
-      try {
-        let r = await dbx.filesListFolder({ path: folder, shared_link, include_media_info: true });
-        let d = r.result;
-        for(const e of d.entries){
-          if(e[".tag"]==="folder") queue.push(e.path_lower);
-          else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
-        }
-        while(d.has_more){
-          const more = await dbx.filesListFolderContinue({ cursor: d.cursor });
-          d = more.result;
-          for(const e of d.entries){
-            if(e[".tag"]==="folder") queue.push(e.path_lower);
-            else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
-          }
-        }
-      } catch (err) {
-        throw err;
+    while(data.has_more){
+      const more = await dbx.filesListFolderContinue({ cursor: data.cursor });
+      data = more.result;
+      for(const e of data.entries){
+        if(e[".tag"]==="folder") queue.push(e.path_lower);
+        else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
       }
     }
-    return files;
-  };
-
-  try {
-    return await attempt();
-  } catch (e) {
-    if (is401(e) && await refreshAndReinitIfPossible()) {
-      console.log("Refreshed Dropbox token after 401; retrying listAll...");
-      return await attempt();
+  }
+  return files;
+}
+async function listAllWithRetry(){
+  try { const dbx = await makeDbx(); return await listAll(dbx); }
+  catch (e) {
+    if (e?.status === 401 && REFRESH && APP_KEY && APP_SECRET) {
+      console.warn("Token expired; refreshing and retrying once…");
+      const dbx2 = await makeDbx(); return await listAll(dbx2);
     }
     throw e;
   }
 }
-
-async function filePageAndRaw(sharedFolderUrl, subpathLower){
-  const attempt = async () => {
-    const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
+async function filePageAndRaw(dbx, subpathLower){
+  try{
+    const meta = await dbx.sharingGetSharedLinkMetadata({ url: SHARED_URL, path: subpathLower });
     const page = meta.result?.url || null;
     const pageUrl = page ? page.replace(/([?&])raw=1/, "$1dl=0") : null;
     const rawUrl  = page ? (()=>{ const u=new URL(page); u.searchParams.set("raw","1"); u.searchParams.delete("dl"); return u.toString(); })() : null;
     return { pageUrl, rawUrl };
-  };
-  try {
-    return await attempt();
-  } catch (e) {
-    if (is401(e) && await refreshAndReinitIfPossible()) {
-      console.log("Refreshed Dropbox token after 401; retrying metadata...");
-      return await attempt();
-    }
-    return { pageUrl: null, rawUrl: null };
-  }
+  }catch{ return { pageUrl: null, rawUrl: null }; }
+}
+async function fetchThumbViaSharedLink(dbx, subpathLower){
+  const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
+  const arg = { resource:{".tag":"shared_link",url:SHARED_URL,path:subpathLower},
+                format:{".tag":"jpeg"}, mode:{".tag":"fitone_bestfit"}, size:{".tag":"w1024h768"} };
+  const r = await fetch(api, {
+    method:"POST",
+    headers:{ "Authorization":`Bearer ${dbx.auth.getAccessToken()}`, "Dropbox-API-Arg":JSON.stringify(arg), "Content-Type":"application/octet-stream" },
+    body:""
+  });
+  if(!r.ok) throw new Error(`thumb(shared_link) ${r.status}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+async function fetchThumbViaIdOrPath(dbx, idOrPath){
+  const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
+  const arg = { resource:{".tag":"path","path":idOrPath},
+                format:{".tag":"jpeg"}, mode:{".tag":"fitone_bestfit"}, size:{".tag":"w1024h768"} };
+  const r = await fetch(api, {
+    method:"POST",
+    headers:{ "Authorization":`Bearer ${dbx.auth.getAccessToken()}`, "Dropbox-API-Arg":JSON.stringify(arg), "Content-Type":"application/octet-stream" },
+    body:""
+  });
+  if(!r.ok) throw new Error(`thumb(id/path) ${r.status}`);
+  return Buffer.from(await r.arrayBuffer());
 }
 
-async function fetchThumbViaSharedLink(sharedFolderUrl, subpathLower){
-  const arg = {
-    resource: { ".tag":"shared_link", url: sharedFolderUrl, path: subpathLower },
-    format:   { ".tag":"jpeg" },
-    mode:     { ".tag":"fitone_bestfit" },
-    size:     { ".tag":"w1024h768" }
-  };
-  const doReq = async () => {
-    const r = await fetch("https://content.dropboxapi.com/2/files/get_thumbnail_v2", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${ACCESS_TOKEN}`,
-        "Dropbox-API-Arg": JSON.stringify(arg),
-        "Content-Type": "application/octet-stream"
-      },
-      body: ""
-    });
-    if (!r.ok) throw Object.assign(new Error(`thumb(shared_link) ${r.status}`), { status: r.status });
-    return Buffer.from(await r.arrayBuffer());
-  };
-  try {
-    return await doReq();
-  } catch (e) {
-    if (is401(e) && await refreshAndReinitIfPossible()) {
-      console.log("Refreshed Dropbox token after 401; retrying thumbnail(shared)...");
-      return await doReq();
-    }
-    throw e;
-  }
-}
-
-async function fetchThumbViaId(fileId){
-  const arg = {
-    resource: { ".tag":"path", "path": fileId },  // Dropbox accepts ids/paths here
-    format:   { ".tag":"jpeg" },
-    mode:     { ".tag":"fitone_bestfit" },
-    size:     { ".tag":"w1024h768" }
-  };
-  const doReq = async () => {
-    const r = await fetch("https://content.dropboxapi.com/2/files/get_thumbnail_v2", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${ACCESS_TOKEN}`,
-        "Dropbox-API-Arg": JSON.stringify(arg),
-        "Content-Type": "application/octet-stream"
-      },
-      body: ""
-    });
-    if (!r.ok) throw Object.assign(new Error(`thumb(id) ${r.status}`), { status: r.status });
-    return Buffer.from(await r.arrayBuffer());
-  };
-  try {
-    return await doReq();
-  } catch (e) {
-    if (is401(e) && await refreshAndReinitIfPossible()) {
-      console.log("Refreshed Dropbox token after 401; retrying thumbnail(id)...");
-      return await doReq();
-    }
-    throw e;
-  }
-}
-
-/* === HTML (single InfoWindow, pagination, smart cluster zoom, robust image fallback, lightbox prev/next) === */
+/* === HTML (popup uses full_external fallback) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -244,20 +158,17 @@ function htmlTemplate({ dataUrl, apiKey }){
   .gm-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
   .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
   .gm-count { font-size: 12px; opacity: .7; }
-  /* Lightbox */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
   #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
   #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
-  #lightbox .prev { left: 16px; }
-  #lightbox .next { right: 16px; }
+  #lightbox .prev { left: 16px; } #lightbox .next { right: 16px; }
   #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-<!-- Lightbox -->
 <div id="lightbox" aria-modal="true" role="dialog">
   <span class="close" aria-label="Close">×</span>
   <button class="nav prev" aria-label="Previous">‹</button>
@@ -268,8 +179,8 @@ function htmlTemplate({ dataUrl, apiKey }){
 
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
-const MAX_INIT_ZOOM = 8;      // after initial fit
-const MAX_CLUSTER_ZOOM = 12;  // when opening a cluster
+const MAX_INIT_ZOOM = 8;
+const MAX_CLUSTER_ZOOM = 12;
 
 function groupByCoord(features) {
   const by = new Map();
@@ -291,8 +202,6 @@ function groupByCoord(features) {
   }
   return Array.from(by.values());
 }
-
-// swap raw<->dl in a Dropbox link
 function toggleDropboxParam(u){
   try{
     const url = new URL(u);
@@ -309,22 +218,17 @@ function toggleDropboxParam(u){
 }
 
 async function initMap() {
-  const map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 45.94, lng: 25.0 },
-    zoom: 6,
-    mapTypeControl: false
-  });
+  const map = new google.maps.Map(document.getElementById('map'), { center: { lat: 45.94, lng: 25.0 }, zoom: 6, mapTypeControl: false });
+  const info = new google.maps.InfoWindow();
 
-  const info = new google.maps.InfoWindow(); // exactly one open at a time
-
-  // Lightbox state & helpers
+  // Lightbox
   const lb = document.getElementById('lightbox');
   const lbImg = lb.querySelector('img');
   const lbClose = lb.querySelector('.close');
   const lbPrev = lb.querySelector('.prev');
   const lbNext = lb.querySelector('.next');
   const lbCount = lb.querySelector('.counter');
-  let lbState = null; // { group, index }
+  let lbState = null;
 
   function renderLightbox() {
     if (!lbState) return;
@@ -338,6 +242,11 @@ async function initMap() {
     lbCount.textContent = (n > 1) ? ( (i+1) + " / " + n ) : "";
     lbPrev.style.display = (n > 1) ? "block" : "none";
     lbNext.style.display = (n > 1) ? "block" : "none";
+    lbImg.onerror = () => {
+      const alt = toggleDropboxParam(lbImg.src);
+      if (alt !== lbImg.src) { lbImg.src = alt; return; }
+      if (it.thumb_external && lbImg.src !== it.thumb_external) lbImg.src = it.thumb_external;
+    };
   }
   function openLightbox(group, index) { lbState = { group, index }; renderLightbox(); lb.style.display = 'flex'; }
   function closeLightbox() { lb.style.display = 'none'; lbImg.src = ''; lbState = null; }
@@ -353,7 +262,7 @@ async function initMap() {
   });
 
   try {
-    const res = await fetch('${dataUrl}?ts=' + Date.now());
+    const res = await fetch('${"locations.json"}?ts=' + Date.now());
     const geo = await res.json();
     const groups = groupByCoord(geo.features || []);
     const markers = [];
@@ -364,14 +273,15 @@ async function initMap() {
         if (alt !== imgEl.src) { imgEl.src = alt; return; }
         if (it.full_external && imgEl.src !== it.full_external) { imgEl.src = it.full_external; return; }
         if (it.thumb_external && imgEl.src !== it.thumb_external) { imgEl.src = it.thumb_external; return; }
-      }, { once:false });
+      });
     }
 
     function renderPopup(marker, g, idx) {
       const n = g.items.length;
       const i = ((idx % n) + n) % n;
       const it = g.items[i];
-      const imgSrc = it.thumb || it.thumb_external || null;
+      // *** key change: also fall back to full_external ***
+      const imgSrc = it.thumb || it.thumb_external || it.full_external || null;
       const html =
         '<div class="gm-popup" data-idx="'+i+'">' +
           (n>1 ? (
@@ -406,19 +316,17 @@ async function initMap() {
       });
     }
 
-    // One marker per grouped coordinate
     for (const g of groups) {
       const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
       m.addListener('click', () => renderPopup(m, g, 0));
       markers.push(m);
     }
 
-    // CLUSTER: open by fitting bounds, then cap zoom so it doesn't dive to street level
     new markerClusterer.MarkerClusterer({
       map,
       markers,
       onClusterClick: (ev) => {
-        info.close(); // close any open popup first
+        info.close();
         map.fitBounds(ev.cluster.bounds, 60);
         google.maps.event.addListenerOnce(map, 'idle', () => {
           if (map.getZoom() > MAX_CLUSTER_ZOOM) map.setZoom(MAX_CLUSTER_ZOOM);
@@ -426,7 +334,6 @@ async function initMap() {
       }
     });
 
-    // Initial fit to all markers, capped at MAX_INIT_ZOOM
     if (markers.length) {
       const b = new google.maps.LatLngBounds();
       markers.forEach(m => b.extend(m.getPosition()));
@@ -447,11 +354,18 @@ async function initMap() {
 
 /* === Build === */
 (async () => {
-  console.log("Ensuring Dropbox access token…");
-  await initDbx();
-
   console.log("Listing Dropbox shared folder…");
-  const entries = await listAll(DROPBOX_SHARED_URL);
+  let dbx = await makeDbx();
+
+  let entries;
+  try { entries = await listAll(dbx); }
+  catch (e) {
+    if (e?.status === 401 && REFRESH && APP_KEY && APP_SECRET) {
+      console.warn("Access token expired mid-list; refreshing and retrying…");
+      dbx = await makeDbx(); entries = await listAll(dbx);
+    } else { throw e; }
+  }
+
   console.log(`Found ${entries.length} images.`);
 
   await fs.mkdir("site", { recursive: true });
@@ -464,7 +378,6 @@ async function initMap() {
     try {
       let lon=null, lat=null, when=null, source=null;
 
-      // 1) GPS via media_info
       const media = f.media_info?.metadata;
       if (media?.location) {
         lat = media.location?.latitude ?? null;
@@ -472,14 +385,10 @@ async function initMap() {
         when = media?.time_taken || null;
         if (lat!=null && lon!=null) { viaMedia++; source="media_info"; }
       }
-
-      // 2) Filename guess
       if (lat==null || lon==null) {
         const g = guessFromFilename(f.name);
         if (g){ [lon,lat]=g; viaGuess++; source = source || "filename"; }
       }
-
-      // 3) Optional Nominatim
       if ((lat==null || lon==null) && ENABLE_NOMINATIM) {
         const urlName = f.name.replace(/\.[^.]+$/,"").replace(/[_\-.]+/g," ").trim();
         try{
@@ -491,32 +400,26 @@ async function initMap() {
           }
         }catch{}
       }
-
       if (lat==null || lon==null) { skipped++; continue; }
 
-      // Per-file links
-      const { pageUrl, rawUrl } = await filePageAndRaw(DROPBOX_SHARED_URL, f.path_lower);
+      const { pageUrl, rawUrl } = await filePageAndRaw(dbx, f.path_lower);
 
-      // Try local thumbnail (A then B)
       let thumbRel = null;
       try {
-        const buf = await fetchThumbViaSharedLink(DROPBOX_SHARED_URL, f.path_lower);
+        const buf = await fetchThumbViaSharedLink(dbx, f.path_lower);
         const name = "t-" + md5(f.path_lower) + ".jpg";
         await fs.writeFile(path.join("site/thumbs", name), buf);
-        thumbRel = "thumbs/" + name;
-        thumbs++;
+        thumbRel = "thumbs/" + name; thumbs++;
       } catch {}
-      if (!thumbRel && f.id) {
+      if (!thumbRel) {
         try {
-          const buf2 = await fetchThumbViaId(f.id);
-          const name2 = "t-" + md5(f.id) + ".jpg";
+          const buf2 = await fetchThumbViaIdOrPath(dbx, f.path_lower || f.id);
+          const name2 = "t-" + md5(f.id || f.path_lower) + ".jpg";
           await fs.writeFile(path.join("site/thumbs", name2), buf2);
-          thumbRel = "thumbs/" + name2;
-          thumbs++;
+          thumbRel = "thumbs/" + name2; thumbs++;
         } catch {}
       }
 
-      // External raw fallback
       let thumbExternal = null;
       if (!thumbRel && rawUrl) { thumbExternal = rawUrl; extLinks++; }
 
@@ -527,16 +430,14 @@ async function initMap() {
           taken_at: when,
           source,
           original_page: pageUrl,
-          thumb: thumbRel,               // local thumbnail
-          thumb_external: thumbExternal, // fallback for <img>
-          full_external: rawUrl          // bigger image for lightbox
+          thumb: thumbRel,
+          thumb_external: thumbExternal,
+          full_external: rawUrl
         },
         geometry: { type: "Point", coordinates: [lon, lat] }
       });
 
-    } catch {
-      skipped++;
-    }
+    } catch { skipped++; }
   }
 
   const geo = { type: "FeatureCollection", features };
