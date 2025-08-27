@@ -1,6 +1,6 @@
 {
   "name": "photo-locations",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "private": true,
   "engines": { "node": ">=18" },
@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "dropbox": "^10.34.0",
+    "jimp": "^0.22.12",
     "node-fetch": "^3.3.2"
   }
 }
