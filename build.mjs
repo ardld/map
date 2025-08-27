@@ -125,7 +125,7 @@ async function fetchThumbViaId(fileId){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML (single InfoWindow, pagination, smart cluster zoom, lightbox with prev/next) === */
+/* === HTML (single InfoWindow, pagination, smart cluster zoom, lightbox, robust image fallback) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -191,6 +191,22 @@ function groupByCoord(features) {
   return Array.from(by.values());
 }
 
+// swap raw<->dl in a Dropbox link
+function toggleDropboxParam(u){
+  try{
+    const url = new URL(u);
+    if (url.hostname.includes('dropbox')) {
+      const hasRaw = url.searchParams.get('raw') === '1';
+      const hasDl  = url.searchParams.get('dl') === '1';
+      if (hasRaw) { url.searchParams.delete('raw'); url.searchParams.set('dl','1'); }
+      else if (hasDl) { url.searchParams.delete('dl'); url.searchParams.set('raw','1'); }
+      else { url.searchParams.set('raw','1'); }
+      return url.toString();
+    }
+  }catch{}
+  return u;
+}
+
 async function initMap() {
   const map = new google.maps.Map(document.getElementById('map'), {
     center: { lat: 45.94, lng: 25.0 },
@@ -204,8 +220,8 @@ async function initMap() {
   const lb = document.getElementById('lightbox');
   const lbImg = lb.querySelector('img');
   const lbClose = lb.querySelector('.close');
-  const lbPrev = lb.querySelector('.prev');
-  const lbNext = lb.querySelector('.next');
+  const lbPrev = lb.querySelector(' .prev');
+  const lbNext = lb.querySelector(' .next');
   const lbCount = lb.querySelector('.counter');
   let lbState = null; // { group, index }
 
@@ -241,6 +257,18 @@ async function initMap() {
     const groups = groupByCoord(geo.features || []);
     const markers = [];
 
+    function attachImgFallback(imgEl, it){
+      imgEl.addEventListener('error', () => {
+        // Try toggling Dropbox param
+        const alt = toggleDropboxParam(imgEl.src);
+        if (alt !== imgEl.src) { imgEl.src = alt; return; }
+        // Try switching to external full image
+        if (it.full_external && imgEl.src !== it.full_external) { imgEl.src = it.full_external; return; }
+        // Last resort: switch to thumb_external
+        if (it.thumb_external && imgEl.src !== it.thumb_external) { imgEl.src = it.thumb_external; return; }
+      }, { once:false });
+    }
+
     function renderPopup(marker, g, idx) {
       const n = g.items.length;
       const i = ((idx % n) + n) % n;
@@ -257,7 +285,7 @@ async function initMap() {
           ) : '') +
           (imgSrc ? ('<div class="imgwrap">' +
                        '<a href="#" class="imglink" data-idx="'+i+'">' +
-                         '<img loading="lazy" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
+                         '<img loading="lazy" class="gm-img" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
                        '</a>' +
                      '</div>') : '') +
           '<div class="gm-title">'+(it.title||'')+'</div>' +
@@ -271,7 +299,9 @@ async function initMap() {
         const prev = document.querySelector('.gm-prev');
         const next = document.querySelector('.gm-next');
         const link = document.querySelector('.imglink');
+        const img  = document.querySelector('.gm-img');
 
+        if (img) attachImgFallback(img, it);
         if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i-1); };
         if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i+1); };
         if (link) link.onclick = (e)=>{ e.preventDefault(); openLightbox(g, i); };
@@ -316,6 +346,7 @@ async function initMap() {
 </body>
 </html>`;
 }
+
 
 /* === Build === */
 (async () => {
