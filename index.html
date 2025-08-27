@@ -6,56 +6,147 @@
 <title>Photo Map • Google Maps</title>
 <style>
   html, body, #map { height: 100%; margin: 0; }
-  .gm-popup { max-width: 320px; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .gm-popup img { width: 100%; height: auto; display: block; border-radius: 8px; margin-bottom: 6px; }
-  .gm-title { font-weight: 600; margin-bottom: 2px; }
+  .gm-popup { max-width: 340px; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .gm-popup .imgwrap { position: relative; }
+  .gm-popup img { width: 100%; height: auto; display: block; border-radius: 8px; }
+  .gm-title { font-weight: 600; margin: 6px 0 2px 0; }
   .gm-meta { opacity: .7; font-size: 12px; }
+  .gm-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+  .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .gm-count { font-size: 12px; opacity: .7; }
+  /* Lightbox */
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; align-items: center; justify-content: center; z-index: 9999; }
+  #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
+  #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
+<!-- Lightbox -->
+<div id="lightbox">
+  <span class="close" aria-label="Close">×</span>
+  <img alt="">
+</div>
+
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
+function groupByCoord(features) {
+  const by = new Map();
+  for (const f of features) {
+    const c = f.geometry?.coordinates;
+    const p = f.properties || {};
+    if (!c || c.length < 2) continue;
+    const lat = c[1], lng = c[0];
+    const key = lat.toFixed(5) + "," + lng.toFixed(5); // group within ~1m
+    const item = {
+      title: p.title || "",
+      taken_at: p.taken_at || "",
+      thumb: p.thumb || null,
+      thumb_external: p.thumb_external || null,
+      full_external: p.full_external || p.thumb_external || p.thumb || null
+    };
+    if (!by.has(key)) by.set(key, { lat, lng, items: [item] });
+    else by.get(key).items.push(item);
+  }
+  return Array.from(by.values());
+}
+
 async function initMap() {
   const map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 45.94, lng: 25.0 }, zoom: 6, mapTypeControl: false
+    center: { lat: 45.94, lng: 25.0 },
+    zoom: 6,
+    mapTypeControl: false
   });
+
+  const info = new google.maps.InfoWindow(); // single InfoWindow => only one open at a time
+
+  // Lightbox helpers
+  const lb = document.getElementById('lightbox');
+  const lbImg = lb.querySelector('img');
+  const lbClose = lb.querySelector('.close');
+  lb.addEventListener('click', (e)=>{ if(e.target===lb || e.target===lbClose) { lb.style.display='none'; lbImg.src=''; }});
+  document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') { lb.style.display='none'; lbImg.src=''; }});
 
   try {
     const res = await fetch('locations.json?ts=' + Date.now());
     const geo = await res.json();
+
+    // Group multiple photos at identical coords
+    const groups = groupByCoord(geo.features || []);
     const markers = [];
 
-    for (const f of geo.features || []) {
-      const c = f.geometry?.coordinates;
-      if (!c || c.length < 2) continue;
-      const lat = c[1], lng = c[0];
-
-      const p = f.properties || {};
-      const title = p.title || '';
-      const imgSrc = p.thumb || p.thumb_external || null;   // 👈 fallback to external raw link
-      const linkTo = p.original_page || p.thumb_external || null;
-
+    function renderPopup(marker, g, idx) {
+      const n = g.items.length;
+      const i = ((idx % n) + n) % n;
+      const it = g.items[i];
+      const imgSrc = it.thumb || it.thumb_external || null;
       const html =
-        '<div class="gm-popup">' +
-          (imgSrc ? ('<a ' + (linkTo ? 'href="'+linkTo+'" target="_blank" rel="noopener"' : '') + '>' +
-                     '<img loading="lazy" src="'+imgSrc+'" alt="'+title+'"></a>') : '') +
-          '<div class="gm-title">' + title + '</div>' +
-          (p.taken_at ? '<div class="gm-meta">' + p.taken_at + '</div>' : '') +
+        '<div class="gm-popup" data-idx="'+i+'">' +
+          (n>1 ? (
+            '<div class="gm-pager">' +
+              '<button class="gm-btn gm-prev" aria-label="Previous">‹ Prev</button>' +
+              '<span class="gm-count">'+(i+1)+' / '+n+'</span>' +
+              '<button class="gm-btn gm-next" aria-label="Next">Next ›</button>' +
+            '</div>'
+          ) : '') +
+          (imgSrc ? ('<div class="imgwrap">' +
+                       '<a href="#" class="imglink" data-full="'+(it.full_external||'')+'">' +
+                         '<img loading="lazy" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
+                       '</a>' +
+                     '</div>') : '') +
+          '<div class="gm-title">'+(it.title||'')+'</div>' +
+          (it.taken_at ? '<div class="gm-meta">'+it.taken_at+'</div>' : '') +
         '</div>';
 
-      const info = new google.maps.InfoWindow({ content: html });
-      const m = new google.maps.Marker({ position: { lat, lng }, title });
-      m.addListener('click', () => info.open({ anchor: m, map }));
+      info.setContent(html);
+      info.open({ anchor: marker, map });
+
+      // Wire controls once DOM is ready for THIS content
+      google.maps.event.addListenerOnce(info, 'domready', () => {
+        const box = document.querySelector('.gm-popup');
+        const prev = document.querySelector('.gm-prev');
+        const next = document.querySelector('.gm-next');
+        const link = document.querySelector('.imglink');
+
+        if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i-1); };
+        if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, g, i+1); };
+
+        if (link) link.onclick = (e)=>{
+          e.preventDefault();
+          const full = link.getAttribute('data-full');
+          if (full) { lbImg.src = full; lb.style.display = 'flex'; }
+        };
+      });
+    }
+
+    // Create one marker per group
+    for (const g of groups) {
+      const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
+      m.addListener('click', () => renderPopup(m, g, 0));
       markers.push(m);
     }
 
+    // Cluster with a gentle cluster-zoom
+    new markerClusterer.MarkerClusterer({
+      map,
+      markers,
+      onClusterClick: (ev) => {
+        const bounds = ev.cluster.bounds;
+        map.fitBounds(bounds);
+        // Cap zoom so it doesn't dive into street level
+        setTimeout(() => { if (map.getZoom() > 8) map.setZoom(8); }, 0);
+      }
+    });
+
+    // Fit bounds initially, but cap zoom (keep it higher)
     if (markers.length) {
-      new markerClusterer.MarkerClusterer({ map, markers });
       const b = new google.maps.LatLngBounds();
       markers.forEach(m => b.extend(m.getPosition()));
       map.fitBounds(b);
+      google.maps.event.addListenerOnce(map, 'idle', () => {
+        if (map.getZoom() > 8) map.setZoom(8);
+      });
     }
   } catch (e) {
     console.error('Failed to load data', e);
