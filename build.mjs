@@ -1,3 +1,4 @@
+// buildi.js
 import { Dropbox } from "dropbox";
 import fs from "fs/promises";
 import path from "path";
@@ -5,15 +6,15 @@ import fetch from "node-fetch";
 import crypto from "node:crypto";
 
 /* === Config (env) === */
-const RAW_TOKEN    = process.env.DROPBOX_TOKEN;            // optional (short-lived)
-const REFRESH      = process.env.DROPBOX_REFRESH_TOKEN;     // preferred long-lived
-const APP_KEY      = process.env.DROPBOX_APP_KEY;
-const APP_SECRET   = process.env.DROPBOX_APP_SECRET;
-const SHARED_URL   = process.env.DROPBOX_SHARED_URL;
-const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "";
-const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1";
+const RAW_TOKEN       = process.env.DROPBOX_TOKEN;            // optional (short-lived)
+const REFRESH         = process.env.DROPBOX_REFRESH_TOKEN;     // preferred long-lived
+const APP_KEY         = process.env.DROPBOX_APP_KEY;
+const APP_SECRET      = process.env.DROPBOX_APP_SECRET;
+const SHARED_URL      = process.env.DROPBOX_SHARED_URL;        // REQUIRED
+const GMAPS_API_KEY   = process.env.GMAPS_API_KEY || "";       // for front-end map
+const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1"; // optional reverse geocode
 const NOMINATIM_EMAIL  = process.env.NOMINATIM_EMAIL || "";
-const NOMI_THROTTLE = parseInt(process.env.NOMINATIM_THROTTLE_MS || "1100", 10);
+const NOMI_THROTTLE    = parseInt(process.env.NOMINATIM_THROTTLE_MS || "1100", 10);
 
 if (!SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
 
@@ -126,27 +127,36 @@ function titleFromFilename(name) {
   return words.join(' ');
 }
 
-/* === Read research overrides (cuprins) if present ===
+/* === Read research overrides (cuprins) with exact names & regex patterns ===
    content.json format (array):
    [
      { "filename": "Feldioara.jpg", "title": "Feldioara Fortress, Brașov County", "description": "..." },
-     { "filename": "Breb MM clopuri.jpg", "title": "Breb, Maramureș – Wooden Gates & Traditions", "description": "..." }
+     { "pattern": "^capidava", "title": "Capidava Fortress, Dobrogea", "description": "..." }
    ]
 */
 async function loadOverrides() {
   try {
     const txt = await fs.readFile("content.json","utf8");
     const arr = JSON.parse(txt);
-    const map = new Map();
+    const byName = new Map(); // exact base filename match (lowercased, no extension)
+    const patterns = [];      // [{ re: RegExp, data: {title, description}}]
+
     for (const it of arr) {
-      if (!it || !it.filename) continue;
-      map.set(baseKey(it.filename), { title: String(it.title||""), description: String(it.description||"") });
+      if (!it) continue;
+      const title = String(it.title || "");
+      const description = String(it.description || "");
+      if (it.filename) {
+        byName.set(baseKey(it.filename), { title, description });
+      } else if (it.pattern) {
+        // patterns operate on lowercased base filenames (no extension)
+        patterns.push({ re: new RegExp(it.pattern, "i"), data: { title, description } });
+      }
     }
-    console.log(`Loaded ${map.size} content overrides from content.json`);
-    return map;
+    console.log(`Loaded ${byName.size} filename overrides and ${patterns.length} pattern overrides from content.json`);
+    return { byName, patterns };
   } catch {
     console.log("No content.json found; using auto-generated titles/descriptions.");
-    return new Map();
+    return { byName: new Map(), patterns: [] };
   }
 }
 
@@ -228,10 +238,10 @@ async function fetchThumbViaIdOrPath(dbx, idOrPath){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML (light theme, left TOC shows cuprins titles, left explanation shows DESCRIPTION FIRST) === */
+/* === HTML (light theme, TOC uses cuprins titles, left panel shows DESCRIPTION FIRST) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
-<html lang="en">
+<html lang="ro">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -268,7 +278,8 @@ function htmlTemplate({ dataUrl, apiKey }){
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
   #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
   #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
-  #lightbox .prev { left: 16px; } .#lightbox .next { right: 16px; }
+  #lightbox .prev { left: 16px; }
+  #lightbox .next { right: 16px; }
   #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
 </style>
 </head>
@@ -276,7 +287,7 @@ function htmlTemplate({ dataUrl, apiKey }){
 <div id="wrap">
   <div id="left">
     <div id="brand">Real Romania • Cuprins</div>
-    <div id="toc" role="navigation" aria-label="Places"></div>
+    <div id="toc" role="navigation" aria-label="Locuri"></div>
     <div id="explain">
       <p>Selectează un loc din stânga sau un pin pe hartă.</p>
       <h3>&nbsp;</h3>
@@ -287,10 +298,10 @@ function htmlTemplate({ dataUrl, apiKey }){
 
 <!-- Lightbox -->
 <div id="lightbox" aria-modal="true" role="dialog">
-  <span class="close" aria-label="Close">×</span>
-  <button class="nav prev" aria-label="Previous">‹</button>
+  <span class="close" aria-label="Închide">×</span>
+  <button class="nav prev" aria-label="Înapoi">‹</button>
   <img alt="">
-  <button class="nav next" aria-label="Next">›</button>
+  <button class="nav next" aria-label="Înainte">›</button>
   <div class="counter"></div>
 </div>
 
@@ -380,7 +391,7 @@ function renderExplain(group, idx){
   const ex = left.explain;
   ex.innerHTML = "";
 
-  // DESCRIPTION FIRST
+  // DESCRIPTION FIRST (cuprins desc preferred)
   const p = document.createElement('p');  p.textContent = it.cuprins_desc || it.blurb || '';
   const h = document.createElement('h3'); h.textContent = it.cuprins_title || it.place_title || it.title || 'Foto';
 
@@ -620,9 +631,10 @@ async function initMap() {
       const autoBlurb = makeBlurb(autoPlaceTitle, placeInfo?.components);
 
       // Apply overrides from cuprins if present
-      const ov = overrides.get(key) || null;
-      const cuprinsTitle = ov?.title?.trim() || "";
-      const cuprinsDesc  = ov?.description?.trim() || "";
+      const ovFromName = overrides.byName.get(key) || null;
+      const ovFromPattern = overrides.patterns.find(p => p.re.test(key))?.data || null;
+      const cuprinsTitle = (ovFromName?.title || ovFromPattern?.title || "").trim();
+      const cuprinsDesc  = (ovFromName?.description || ovFromPattern?.description || "").trim();
 
       // Links
       const { pageUrl, rawUrl } = await filePageAndRaw(dbx, f.path_lower);
