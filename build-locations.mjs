@@ -2,12 +2,10 @@ import { Dropbox } from "dropbox";
 import fs from "fs/promises";
 import path from "path";
 import fetch from "node-fetch";
-import Jimp from "jimp";
 
 /* ===== ENV ===== */
 const DROPBOX_TOKEN = process.env.DROPBOX_TOKEN;
 const DROPBOX_SHARED_URL = process.env.DROPBOX_SHARED_URL;
-const THUMB_MAX_WIDTH = parseInt(process.env.THUMB_MAX_WIDTH || "1024", 10);
 if (!DROPBOX_TOKEN) throw new Error("Missing env DROPBOX_TOKEN");
 if (!DROPBOX_SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
 
@@ -16,26 +14,23 @@ const dbx = new Dropbox({ accessToken: DROPBOX_TOKEN, fetch });
 
 /* ===== Helpers ===== */
 const IMAGE_EXTS = [".jpg",".jpeg",".png",".webp",".tif",".tiff",".heic",".heif"];
-function isImage(name=""){ const n = name.toLowerCase(); return IMAGE_EXTS.some(ext => n.endsWith(ext)); }
+function isImage(name=""){ const n=name.toLowerCase(); return IMAGE_EXTS.some(ext=>n.endsWith(ext)); }
 const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+function baseNoExt(n=""){ return n.replace(/\.[^.]+$/,"").replace(/[_\-.]+/g," ").trim(); }
 function safeFile(n=""){ return n.toLowerCase().replace(/[^a-z0-9._-]+/g,"-").replace(/^-+|-+$/g,""); }
-function baseNoExt(n=""){ return n.replace(/\.[^.]+$/, "").replace(/[_\-.]+/g, " ").trim(); }
 function toRaw(u){ const url=new URL(u); url.searchParams.set("raw","1"); url.searchParams.delete("dl"); return url.toString(); }
 
-/* Mini gazetteer [lon,lat] — extend anytime */
+/* Mini gazetteer [lon,lat] — add more as you like */
 const GAZ = {
-  "breb":[23.9049,47.7485],"barsana":[24.0425,47.7367],"bethlen cris":[24.671,46.1932],
-  "cris":[24.671,46.1932],"brateiu":[24.3826,46.1491],"bistrita":[24.5,47.133],
-  "bnr":[26.0986,44.4305],"ateneu":[26.098,44.4412],"cheile bicazului":[25.8241,46.8121],
-  "bicaz":[26.0901,46.9133],"bigar":[22.3514,45.0039],"praid":[25.1358,46.5534],
-  "sasca":[21.7577,44.8803],"sucevita":[25.7206,47.7814],"sapanta":[23.6932,47.9682],
-  "viscri":[25.0918,46.0558],"tihuta":[24.8058,47.3147],"bazias":[21.43,44.784],
-  "vodita":[22.416,44.673],"zimbri hateg":[22.9538,45.6117],"vanatori neamt":[26.234,47.219],
-  "lazarea":[25.5169,46.777],"enisala":[28.8382,44.8864],"feldioara":[25.5862,45.8282],
-  "poienile izei":[24.116,47.694],"oravita":[21.6911,45.0391],"anina":[21.8583,45.0839],
-  "capidava":[28.08,44.51],"cernavoda":[28.0333,44.3333],"harsova":[27.9533,44.6833],
-  "rasova":[27.9344,44.2458],"seimeni":[28.0713,44.3932],"izvoarele":[28.165,44.392],
-  "topalu":[28.011,44.531],"ogra":[24.289,46.464],"haller":[24.289,46.464],"dupus":[24.2164,46.2178]
+  "breb":[23.9049,47.7485],"barsana":[24.0425,47.7367],"bethlen cris":[24.671,46.1932],"cris":[24.671,46.1932],
+  "brateiu":[24.3826,46.1491],"bistrita":[24.5,47.133],"bnr":[26.0986,44.4305],"ateneu":[26.098,44.4412],
+  "cheile bicazului":[25.8241,46.8121],"bicaz":[26.0901,46.9133],"bigar":[22.3514,45.0039],"praid":[25.1358,46.5534],
+  "sasca":[21.7577,44.8803],"sucevita":[25.7206,47.7814],"sapanta":[23.6932,47.9682],"viscri":[25.0918,46.0558],
+  "tihuta":[24.8058,47.3147],"bazias":[21.43,44.784],"vodita":[22.416,44.673],"zimbri hateg":[22.9538,45.6117],
+  "vanatori neamt":[26.234,47.219],"lazarea":[25.5169,46.777],"enisala":[28.8382,44.8864],"feldioara":[25.5862,45.8282],
+  "poienile izei":[24.116,47.694],"oravita":[21.6911,45.0391],"anina":[21.8583,45.0839],"capidava":[28.08,44.51],
+  "cernavoda":[28.0333,44.3333],"harsova":[27.9533,44.6833],"rasova":[27.9344,44.2458],"seimeni":[28.0713,44.3932],
+  "izvoarele":[28.165,44.392],"topalu":[28.011,44.531],"ogra":[24.289,46.464],"haller":[24.289,46.464],"dupus":[24.2164,46.2178]
 };
 function guessFromFilename(name=""){
   const t = norm(name);
@@ -43,48 +38,50 @@ function guessFromFilename(name=""){
   return keys.length ? GAZ[keys[0]] : null;
 }
 
-/* List everything via shared link */
+/* List all images in the shared folder (recursively) */
 async function listAll(sharedUrl){
   const shared_link = { url: sharedUrl };
   const files = [], queue = [""];
-  while(queue.length){
+  while (queue.length){
     const folder = queue.shift();
     let res = await dbx.filesListFolder({ path: folder, shared_link, include_media_info: true });
     let data = res.result;
-    for(const e of data.entries){
-      if(e[".tag"]==="folder") queue.push(e.path_lower);
-      else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
+
+    for (const e of data.entries){
+      if (e[".tag"]==="folder") queue.push(e.path_lower);
+      else if (e[".tag"]==="file" && isImage(e.name)) files.push(e);
     }
-    while(data.has_more){
+
+    while (data.has_more){
       const more = await dbx.filesListFolderContinue({ cursor: data.cursor });
       data = more.result;
-      for(const e of data.entries){
-        if(e[".tag"]==="folder") queue.push(e.path_lower);
-        else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
+      for (const e of data.entries){
+        if (e[".tag"]==="folder") queue.push(e.path_lower);
+        else if (e[".tag"]==="file" && isImage(e.name)) files.push(e);
       }
     }
   }
   return files;
 }
 
-/* Get a per-file shared link from the folder link, then derive raw + page */
+/* Get per-file shared link from the folder link (no ownership required) */
 async function getFileLinks(sharedFolderUrl, subpathLower){
-  const m = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
-  const pageUrl = m.result?.url;
-  if(!pageUrl) throw new Error("no file link");
-  const rawUrl = toRaw(pageUrl);               // direct image bytes
-  const nicePage = pageUrl.replace(/([?&])raw=1/, "$1dl=0"); // clean open link
-  return { rawUrl, pageUrl: nicePage };
+  const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
+  const page = meta.result?.url;
+  if (!page) throw new Error("no file link");
+  return { pageUrl: page.replace(/([?&])raw=1/,"$1dl=0"), rawUrl: toRaw(page) };
 }
 
-/* Download → make JPG thumbnail (if supported); otherwise we'll fall back to raw */
-async function makeThumbFromRaw(rawUrl, outPath){
-  const r = await fetch(rawUrl, { redirect: "follow" });
-  if(!r.ok) throw new Error(`http ${r.status}`);
-  const buf = Buffer.from(await r.arrayBuffer());
-  const img = await Jimp.read(buf);           // may throw on HEIC
-  if (img.getWidth() > THUMB_MAX_WIDTH) img.resize({ w: THUMB_MAX_WIDTH });
-  await img.quality(82).writeAsync(outPath);
+/* Ask Dropbox to generate a JPEG thumbnail directly from the shared link */
+async function getThumbnailBuffer(sharedFolderUrl, subpathLower){
+  const r = await dbx.filesGetThumbnailV2({
+    resource: { ".tag":"shared_link", url: sharedFolderUrl, path: subpathLower },
+    format: { ".tag":"jpeg" },
+    mode:   { ".tag":"fitone_bestfit" },
+    size:   { ".tag":"w1024h768" }      // big enough for popups
+  });
+  // Node SDK v10 puts image bytes on the "result.fileBinary"
+  return Buffer.from(r.result.fileBinary, "binary");
 }
 
 /* Minimal Leaflet page that shows image (thumb OR original) */
@@ -100,7 +97,7 @@ function htmlTemplate({ dataUrl }){
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <style>
   html, body, #map { height: 100%; margin: 0; }
-  .popup { width: 300px; }
+  .popup { width: 320px; }
   .popup img { width: 100%; height: auto; display:block; border-radius:8px; }
   .title { font: 600 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 8px 0 0; }
   .meta { opacity:.7; font: 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
@@ -120,16 +117,17 @@ fetch('${dataUrl}?ts=' + Date.now())
   .then(r => r.json())
   .then(geo => {
     const markers = L.geoJSON(geo, {
-      pointToLayer: (feat, latlng) => L.marker(latlng),
-      onEachFeature: (feat, layer) => {
-        const p = feat.properties || {};
-        const imgSrc = p.thumb || p.original_raw;   // <— ALWAYS shows an image now
-        const img = imgSrc ? '<a href="'+(p.original_page || p.original_raw)+'" target="_blank" rel="noopener"><img loading="lazy" src="'+imgSrc+'" alt="'+(p.title||'')+'"/></a>' : '';
+      pointToLayer: (f, latlng) => L.marker(latlng),
+      onEachFeature: (f, layer) => {
+        const p = f.properties || {};
+        const imgSrc = p.thumb || p.original_raw;
+        const linkTo = p.original_page || p.original_raw;
+        const img = imgSrc ? '<a href="'+linkTo+'" target="_blank" rel="noopener"><img loading="lazy" src="'+imgSrc+'" alt="'+(p.title||'')+'"/></a>' : '';
         const html = '<div class="popup">'+ img +
           '<div class="title">'+(p.title||'')+'</div>' +
           (p.taken_at ? '<div class="meta">'+p.taken_at+'</div>' : '') +
           '</div>';
-        layer.bindPopup(html, { maxWidth: 340 });
+        layer.bindPopup(html, { maxWidth: 360 });
       }
     });
     clusters.addLayer(markers);
@@ -151,7 +149,7 @@ fetch('${dataUrl}?ts=' + Date.now())
   await fs.mkdir("public", { recursive: true });
   await fs.mkdir("public/thumbs", { recursive: true });
 
-  let usedMedia=0, usedGuess=0, madeThumb=0, skipped=0;
+  let usedMedia=0, usedGuess=0, madeThumb=0, madeRaw=0, skipped=0;
   const features = [];
 
   for (const f of entries) {
@@ -175,23 +173,24 @@ fetch('${dataUrl}?ts=' + Date.now())
 
       if (lat==null || lon==null) { skipped++; continue; }
 
-      // 3) Links + thumbnail (thumb optional)
+      // 3) Image links + thumbnail
       let thumb = null, original_raw = null, original_page = null;
       try {
         const links = await getFileLinks(DROPBOX_SHARED_URL, f.path_lower);
-        original_raw  = links.rawUrl;   // direct bytes
-        original_page = links.pageUrl;  // nice open link
+        original_raw = links.rawUrl;     // direct bytes (fallback <img>)
+        original_page = links.pageUrl;   // pretty page link
+        madeRaw++;
         try {
+          const buf = await getThumbnailBuffer(DROPBOX_SHARED_URL, f.path_lower);
           const thumbName = safeFile(baseNoExt(f.name)) + ".jpg";
-          const outPath = path.join("public/thumbs", thumbName);
-          await makeThumbFromRaw(original_raw, outPath);
+          await fs.writeFile(path.join("public/thumbs", thumbName), buf);
           thumb = "/thumbs/" + thumbName;
           madeThumb++;
         } catch (e) {
-          // Jimp failed (HEIC/unsupported) — fine, we'll use original_raw in popup
+          // thumbnail failed (rare); we still have original_raw
         }
       } catch (e) {
-        // couldn't derive per-file link — popup will still show title only
+        // couldn't derive a file link; no image, but keep the pin
       }
 
       features.push({
@@ -215,6 +214,7 @@ fetch('${dataUrl}?ts=' + Date.now())
 
   const geo = { type: "FeatureCollection", features };
   await fs.writeFile("public/locations.json", JSON.stringify(geo, null, 2), "utf8");
+
   const html = htmlTemplate({ dataUrl: "locations.json" });
   await fs.writeFile("public/index.html", html, "utf8");
   await fs.writeFile("public/200.html", html, "utf8");
@@ -222,6 +222,7 @@ fetch('${dataUrl}?ts=' + Date.now())
   console.log(`Wrote ${features.length} features → public/locations.json`);
   console.log(`  via media_info: ${usedMedia}`);
   console.log(`  via filename: ${usedGuess}`);
+  console.log(`  file links obtained: ${madeRaw}`);
   console.log(`  thumbnails created: ${madeThumb}`);
   console.log(`  skipped: ${skipped}`);
 })().catch(e => { console.error(e); process.exit(1); });
