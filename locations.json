@@ -1,0 +1,1926 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "amurg in pasul Tihuta.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.8058,
+          47.3147
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Apus pe Dunare la Bazias.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          21.43,
+          44.784
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "ateneu cupola.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.098,
+          44.4412
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Ateneu interior.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.098,
+          44.4412
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Barsana sat.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.0425,
+          47.7367
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Bethlen Cris Castel.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.671,
+          46.1932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Bethlen Cris.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.671,
+          46.1932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Bistrita 01.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.5,
+          47.133
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "BNR interior.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.0986,
+          44.4305
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Brateiu satul caldararilor.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.3826,
+          46.1491
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb horinca Maramures.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb in Maramures casa veche.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb in Maramures interior.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb Maramures ceterasi.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb Maramures.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb Maramures poartaJPG.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb MM casă.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb MM clopuri.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Breb MM sculptor.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.9049,
+          47.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Cascada Bigar 02.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          22.3514,
+          45.0039
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Castelul Lazar din Lazarea 01.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.5169,
+          46.777
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Cheile Bicazului 02.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.8241,
+          46.8121
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Castelul Lazar din Lazarea 02.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.5169,
+          46.777
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Cheile Bicazului 03.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.8241,
+          46.8121
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Dupus.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.2164,
+          46.2178
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Enisala Bujori.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.8382,
+          44.8864
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Feldioara.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.5862,
+          45.8282
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Lacul Bicaz 01.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.0901,
+          46.9133
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Lacul Bicaz 02.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.0901,
+          46.9133
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Ogra de Mures Castelul Haller.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.289,
+          46.464
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "pictura bisericii de lemn Poienile Izei.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.116,
+          47.694
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Oravita Anina 01.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          21.6911,
+          45.0391
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Praid Casa Fluturilor Exotici 02.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.1358,
+          46.5534
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Punte peste Nera la Sasca.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          21.7577,
+          44.8803
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Sapanta.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          23.6932,
+          47.9682
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Sucevita fatada sud Scara Virtutilor.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.7206,
+          47.7814
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Sucevita.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.7206,
+          47.7814
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Viscri 163 Casa Regelui Charles.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.0918,
+          46.0558
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Vodita Mehedinti.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          22.416,
+          44.673
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Zimbri Hateg.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          22.9538,
+          45.6117
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Zimbri Vanatori Neamt.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.234,
+          47.219
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "capidava (1) 20230702_150952.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.08,
+          44.51
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "capidava (3) 20230702_150952.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.08,
+          44.51
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "capidava (2) 20230702_150952.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.08,
+          44.51
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "capidava (4) 20230702_150952.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.08,
+          44.51
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "capidava (5) 20230702_150952.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.08,
+          44.51
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (1) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (2) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (3) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (4) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (5) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (6) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (7) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (8) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (10) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (9) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (11) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (12) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (13) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (15) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (17) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (18) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (14) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (16) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (19) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (20) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (21) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "cernavoda (22) 20230702_110544.jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0333,
+          44.3333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(1).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(2).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(4).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(3).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(5).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(6).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(7).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(8).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(9).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(10).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "muzeu topalu (1).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.011,
+          44.531
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "seimeni(11).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.0713,
+          44.3932
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "muzeu topalu (2).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.011,
+          44.531
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "muzeu topalu (3).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.011,
+          44.531
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "muzeu topalu (4).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.011,
+          44.531
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "muzeu topalu (5).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.011,
+          44.531
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "muzeu topalu (6).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.011,
+          44.531
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (1).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (2).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (3).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (4).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (5).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (6).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (8).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (7).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "izvoarele (9).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          28.165,
+          44.392
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Rasova (1).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9344,
+          44.2458
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Rasova (2).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9344,
+          44.2458
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (1).jpeg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (2).jpeg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (1).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (2).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (3).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (4).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (5).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (6).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (7).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (8).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (9).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (10).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (11).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (12).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (13).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Harsova (14).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9533,
+          44.6833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "Rasova (3).jpg",
+        "taken_at": null,
+        "source": "filename",
+        "original_page": null,
+        "thumb": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          27.9344,
+          44.2458
+        ]
+      }
+    }
+  ]
+}
