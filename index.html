@@ -11,6 +11,12 @@
   #wrap { display: grid; grid-template-columns: var(--left) 1fr; height: 100%; }
   #left { background: var(--panel); border-right: 1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
   #brand { padding: 12px 14px; border-bottom:1px solid var(--border); font-weight:650; letter-spacing:.2px; }
+  /* DESCRIEREA de sus */
+  #explain { padding: 14px; border-bottom:1px solid var(--border); }
+  #explain h3 { margin: 6px 0 0 0; font-size: 16px; }
+  #explain p { margin: 0 0 8px 0; color: var(--muted); }
+  #explain .thumb { width: 100%; border-radius:12px; margin-top:10px; display:block; border:1px solid var(--border); }
+  /* Lista (cuprins) dedesubt */
   #toc { padding: 8px; overflow:auto; flex: 1 1 auto; }
   .toc-item { padding: 8px 10px; border-radius: 10px; cursor: pointer; display:flex; align-items:center; gap:10px; border:1px solid transparent; }
   .toc-item:hover { background:#eef3ff; border-color:#dde7ff; }
@@ -18,12 +24,8 @@
   .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); opacity:.85; }
   .toc-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
   .toc-count { margin-left:auto; color:var(--muted); font-size:12px; }
-  #explain { padding: 14px; border-top:1px solid var(--border); }
-  #explain h3 { margin: 6px 0 0 0; font-size: 16px; }
-  #explain p { margin: 0 0 8px 0; color: var(--muted); }
-  #explain .thumb { width: 100%; border-radius:12px; margin-top:10px; display:block; border:1px solid var(--border); }
   #map { width: 100%; height: 100%; }
-  /* InfoWindow (on map) */
+  /* InfoWindow pe hartă */
   .gm-popup { max-width: 360px; }
   .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:10px; }
   .gm-pager { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
@@ -45,12 +47,17 @@
 <div id="wrap">
   <div id="left">
     <div id="brand">Real Romania • Cuprins</div>
-    <div id="toc" role="navigation" aria-label="Locuri"></div>
+
+    <!-- DESCRIEREA sus -->
     <div id="explain">
-      <p>Selectează un loc din stânga sau un pin pe hartă.</p>
+      <p>Selectează un loc din listă sau un pin pe hartă. Când alegi, aici vezi descrierea (mai întâi) și o miniatură; imaginea se deschide mare la click.</p>
       <h3>&nbsp;</h3>
     </div>
+
+    <!-- LISTA dedesubt -->
+    <div id="toc" role="navigation" aria-label="Locuri"></div>
   </div>
+
   <div id="map"></div>
 </div>
 
@@ -91,7 +98,7 @@ function groupByCoord(features) {
     if (!by.has(key)) by.set(key, { lat, lng, items: [item] });
     else by.get(key).items.push(item);
   }
-  // prefer cuprins_title for group title
+  // titlu de grup = preferă titlul din cuprins
   return Array.from(by.values()).map(g=>{
     const pick = (get) => {
       const freq = new Map();
@@ -149,7 +156,7 @@ function renderExplain(group, idx){
   const ex = left.explain;
   ex.innerHTML = "";
 
-  // DESCRIPTION FIRST (cuprins desc preferred)
+  // DESCRIEREA PRIMA (din cuprins dacă există)
   const p = document.createElement('p');  p.textContent = it.cuprins_desc || it.blurb || '';
   const h = document.createElement('h3'); h.textContent = it.cuprins_title || it.place_title || it.title || 'Foto';
 
@@ -198,9 +205,9 @@ function renderPopup(marker, group, idx) {
     '<div class="gm-popup" data-idx="'+i+'">' +
       (n>1 ? (
         '<div class="gm-pager">' +
-          '<button class="gm-btn gm-prev" aria-label="Previous">‹ Prev</button>' +
+          '<button class="gm-btn gm-prev" aria-label="Anterior">‹ Înapoi</button>' +
           '<span class="gm-count">'+(i+1)+' / '+n+'</span>' +
-          '<button class="gm-btn gm-next" aria-label="Next">Next ›</button>' +
+          '<button class="gm-btn gm-next" aria-label="Următor">Înainte ›</button>' +
         '</div>'
       ) : '') +
       (imgSrc ? ('<div class="imgwrap">' +
@@ -252,7 +259,7 @@ function buildTOC(groups) {
 }
 
 async function initMap() {
-  // sidebar refs
+  // referințe panou stânga
   left.toc = document.getElementById('toc');
   left.explain = document.getElementById('explain');
   left.lightbox = document.getElementById('lightbox');
@@ -289,7 +296,7 @@ async function initMap() {
     groups = groupByCoord(geo.features || []);
     markers = [];
 
-    // markers (NO clusters)
+    // fără clustere
     for (const g of groups) {
       const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
       m.addListener('click', () => renderPopup(m, g, 0));
@@ -297,7 +304,7 @@ async function initMap() {
     }
     markers.forEach(m=>m.setMap(map));
 
-    // Initial fit to all markers
+    // încadrăm totul la început
     if (markers.length) {
       const b = new google.maps.LatLngBounds();
       markers.forEach(m => b.extend(m.getPosition()));
@@ -309,7 +316,7 @@ async function initMap() {
 
     buildTOC(groups);
   } catch (e) {
-    console.error('Failed to load data', e);
+    console.error('Eroare la încărcarea datelor', e);
   }
 }
 </script>
