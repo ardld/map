@@ -14,20 +14,17 @@
   .gm-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
   .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
   .gm-count { font-size: 12px; opacity: .7; }
-  /* Lightbox */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
   #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
   #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
-  #lightbox .prev { left: 16px; }
-  #lightbox .next { right: 16px; }
+  #lightbox .prev { left: 16px; } #lightbox .next { right: 16px; }
   #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-<!-- Lightbox -->
 <div id="lightbox" aria-modal="true" role="dialog">
   <span class="close" aria-label="Close">×</span>
   <button class="nav prev" aria-label="Previous">‹</button>
@@ -38,8 +35,8 @@
 
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
-const MAX_INIT_ZOOM = 8;      // after initial fit
-const MAX_CLUSTER_ZOOM = 12;  // when opening a cluster
+const MAX_INIT_ZOOM = 8;
+const MAX_CLUSTER_ZOOM = 12;
 
 function groupByCoord(features) {
   const by = new Map();
@@ -61,8 +58,6 @@ function groupByCoord(features) {
   }
   return Array.from(by.values());
 }
-
-// swap raw<->dl in a Dropbox link
 function toggleDropboxParam(u){
   try{
     const url = new URL(u);
@@ -79,22 +74,17 @@ function toggleDropboxParam(u){
 }
 
 async function initMap() {
-  const map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 45.94, lng: 25.0 },
-    zoom: 6,
-    mapTypeControl: false
-  });
+  const map = new google.maps.Map(document.getElementById('map'), { center: { lat: 45.94, lng: 25.0 }, zoom: 6, mapTypeControl: false });
+  const info = new google.maps.InfoWindow();
 
-  const info = new google.maps.InfoWindow(); // exactly one open at a time
-
-  // Lightbox state & helpers
+  // Lightbox
   const lb = document.getElementById('lightbox');
   const lbImg = lb.querySelector('img');
   const lbClose = lb.querySelector('.close');
   const lbPrev = lb.querySelector('.prev');
   const lbNext = lb.querySelector('.next');
   const lbCount = lb.querySelector('.counter');
-  let lbState = null; // { group, index }
+  let lbState = null;
 
   function renderLightbox() {
     if (!lbState) return;
@@ -108,6 +98,11 @@ async function initMap() {
     lbCount.textContent = (n > 1) ? ( (i+1) + " / " + n ) : "";
     lbPrev.style.display = (n > 1) ? "block" : "none";
     lbNext.style.display = (n > 1) ? "block" : "none";
+    lbImg.onerror = () => {
+      const alt = toggleDropboxParam(lbImg.src);
+      if (alt !== lbImg.src) { lbImg.src = alt; return; }
+      if (it.thumb_external && lbImg.src !== it.thumb_external) lbImg.src = it.thumb_external;
+    };
   }
   function openLightbox(group, index) { lbState = { group, index }; renderLightbox(); lb.style.display = 'flex'; }
   function closeLightbox() { lb.style.display = 'none'; lbImg.src = ''; lbState = null; }
@@ -134,14 +129,15 @@ async function initMap() {
         if (alt !== imgEl.src) { imgEl.src = alt; return; }
         if (it.full_external && imgEl.src !== it.full_external) { imgEl.src = it.full_external; return; }
         if (it.thumb_external && imgEl.src !== it.thumb_external) { imgEl.src = it.thumb_external; return; }
-      }, { once:false });
+      });
     }
 
     function renderPopup(marker, g, idx) {
       const n = g.items.length;
       const i = ((idx % n) + n) % n;
       const it = g.items[i];
-      const imgSrc = it.thumb || it.thumb_external || null;
+      // *** key change: also fall back to full_external ***
+      const imgSrc = it.thumb || it.thumb_external || it.full_external || null;
       const html =
         '<div class="gm-popup" data-idx="'+i+'">' +
           (n>1 ? (
@@ -176,19 +172,17 @@ async function initMap() {
       });
     }
 
-    // One marker per grouped coordinate
     for (const g of groups) {
       const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
       m.addListener('click', () => renderPopup(m, g, 0));
       markers.push(m);
     }
 
-    // CLUSTER: open by fitting bounds, then cap zoom so it doesn't dive to street level
     new markerClusterer.MarkerClusterer({
       map,
       markers,
       onClusterClick: (ev) => {
-        info.close(); // close any open popup first
+        info.close();
         map.fitBounds(ev.cluster.bounds, 60);
         google.maps.event.addListenerOnce(map, 'idle', () => {
           if (map.getZoom() > MAX_CLUSTER_ZOOM) map.setZoom(MAX_CLUSTER_ZOOM);
@@ -196,7 +190,6 @@ async function initMap() {
       }
     });
 
-    // Initial fit to all markers, capped at MAX_INIT_ZOOM
     if (markers.length) {
       const b = new google.maps.LatLngBounds();
       markers.forEach(m => b.extend(m.getPosition()));
