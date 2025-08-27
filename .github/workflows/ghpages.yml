@@ -1,0 +1,37 @@
+name: Build & Publish to gh-pages
+
+on:
+  push:
+    branches: [ main, master ]   # works no matter your default branch
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to push to gh-pages
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install deps
+        run: npm ci || npm i
+
+      - name: Build site
+        env:
+          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+          DROPBOX_SHARED_URL: ${{ secrets.DROPBOX_SHARED_URL }}
+          GMAPS_API_KEY: ${{ secrets.GMAPS_API_KEY }}
+          ENABLE_NOMINATIM: "0"     # set to "1" to try filename geocoding via Nominatim
+        run: npm run build
+
+      - name: Publish site/ to gh-pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: site
+          publish_branch: gh-pages
