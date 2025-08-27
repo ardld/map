@@ -13,37 +13,26 @@ const SHARED_URL   = process.env.DROPBOX_SHARED_URL;
 const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "AIzaSyAsT9RvYBryqFnJJpjEuHbtu1WveVMSoaI";
 const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1";
 
-if (!SHARED_URL)    throw new Error("Missing env DROPBOX_SHARED_URL");
+if (!SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
 
 /* === Auth: prefer refresh flow (never expires), else raw token === */
 async function fetchAccessTokenViaRefresh() {
   if (!REFRESH || !APP_KEY || !APP_SECRET) return null;
-  const form = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: REFRESH
-  });
+  const form = new URLSearchParams({ grant_type: "refresh_token", refresh_token: REFRESH });
   const auth = Buffer.from(`${APP_KEY}:${APP_SECRET}`).toString("base64");
   const r = await fetch("https://api.dropboxapi.com/oauth2/token", {
     method: "POST",
-    headers: {
-      "Authorization": `Basic ${auth}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
+    headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
     body: form
   });
-  if (!r.ok) {
-    const body = await r.text().catch(()=> "");
-    throw new Error(`Dropbox refresh failed: ${r.status} ${body}`);
-  }
+  if (!r.ok) throw new Error(`Dropbox refresh failed: ${r.status} ${await r.text().catch(()=> "")}`);
   const j = await r.json();
   return j.access_token;
 }
-
 async function getAccessToken() {
   if (REFRESH && APP_KEY && APP_SECRET) {
-    const t = await fetchAccessTokenViaRefresh();
     console.log("Using Dropbox token via refresh flow.");
-    return t;
+    return await fetchAccessTokenViaRefresh();
   }
   if (RAW_TOKEN) {
     console.log("Using provided DROPBOX_TOKEN (may expire).");
@@ -51,7 +40,6 @@ async function getAccessToken() {
   }
   throw new Error("Provide either refresh credentials (DROPBOX_REFRESH_TOKEN + APP_KEY + APP_SECRET) or a DROPBOX_TOKEN.");
 }
-
 async function makeDbx() {
   const token = await getAccessToken();
   return new Dropbox({ accessToken: token, fetch });
@@ -64,7 +52,7 @@ const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f
 const md5  = s => crypto.createHash("md5").update(s).digest("hex");
 const esc  = s => String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
-/* Tiny RO gazetteer [lon,lat] */
+/* Tiny RO gazetteer [lon,lat] for filename guesses */
 const GAZ = {
   "breb":[23.9049,47.7485],"barsana":[24.0425,47.7367],"bethlen cris":[24.671,46.1932],
   "cris":[24.671,46.1932],"brateiu":[24.3826,46.1491],"bistrita":[24.5,47.133],
@@ -85,7 +73,7 @@ const guessFromFilename = (name="") => {
   return keys.length ? GAZ[keys[0]] : null;
 };
 
-/* === Dropbox ops with 401 refresh retry === */
+/* === Dropbox ops === */
 async function listAll(dbx){
   const shared_link = { url: SHARED_URL };
   const files = [], queue = [""];
@@ -109,7 +97,6 @@ async function listAll(dbx){
   }
   return files;
 }
-
 async function listAllWithRetry(){
   try {
     const dbx = await makeDbx();
@@ -181,7 +168,7 @@ async function fetchThumbViaIdOrPath(dbx, idOrPath){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML (single InfoWindow, pagination, SMART cluster zoom, lightbox with prev/next & fallbacks) === */
+/* === HTML (default cluster click-to-zoom, popup+lightbox prev/next, robust fallbacks) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -223,8 +210,7 @@ function htmlTemplate({ dataUrl, apiKey }){
 
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
-const MAX_INIT_ZOOM = 8;      // after initial fit
-const MAX_CLUSTER_ZOOM = 13;  // when opening a cluster (enough to separate pins)
+const MAX_INIT_ZOOM = 8; // initial fit cap
 
 function groupByCoord(features) {
   const by = new Map();
@@ -274,8 +260,8 @@ async function initMap() {
   const lb = document.getElementById('lightbox');
   const lbImg = lb.querySelector('img');
   const lbClose = lb.querySelector('.close');
-  const lbPrev = lb.querySelector('.prev');  // FIXED selector (no stray space)
-  const lbNext = lb.querySelector('.next');  // FIXED selector
+  const lbPrev = lb.querySelector('.prev');
+  const lbNext = lb.querySelector('.next');
   const lbCount = lb.querySelector('.counter');
   let lbState = null; // { group, index }
 
@@ -291,8 +277,6 @@ async function initMap() {
     lbCount.textContent = (n > 1) ? ( (i+1) + " / " + n ) : "";
     lbPrev.style.display = (n > 1) ? "block" : "none";
     lbNext.style.display = (n > 1) ? "block" : "none";
-
-    // Lightbox fallback as well
     lbImg.onerror = () => {
       const alt = toggleDropboxParam(lbImg.src);
       if (alt !== lbImg.src) { lbImg.src = alt; return; }
@@ -373,32 +357,8 @@ async function initMap() {
       markers.push(m);
     }
 
-    // CLUSTER: open by fitting bounds; cap zoom; if still crowded, nudge one more level
-    new markerClusterer.MarkerClusterer({
-      map,
-      markers,
-      onClusterClick: (ev) => {
-        info.close();
-        const b = ev.cluster && ev.cluster.bounds;
-        const pos = ev.cluster && ev.cluster.position;
-        if (b) {
-          map.fitBounds(b, 60);
-          google.maps.event.addListenerOnce(map, 'idle', () => {
-            if (map.getZoom() > MAX_CLUSTER_ZOOM) map.setZoom(MAX_CLUSTER_ZOOM);
-            // If many markers and we're not at cap, nudge one more step so pins separate
-            const many = ev.cluster && ev.cluster.markers && ev.cluster.markers.length > 2;
-            if (many && map.getZoom() < MAX_CLUSTER_ZOOM && pos) {
-              map.panTo(pos);
-              map.setZoom(Math.min(map.getZoom() + 1, MAX_CLUSTER_ZOOM));
-            }
-          });
-        } else if (pos) {
-          const z = Math.min((map.getZoom()||6) + 2, MAX_CLUSTER_ZOOM);
-          map.panTo(pos);
-          map.setZoom(z);
-        }
-      }
-    });
+    // CLUSTERS: use default click behavior (zoom into the cluster)
+    new markerClusterer.MarkerClusterer({ map, markers });
 
     // Initial fit to all markers, capped at MAX_INIT_ZOOM
     if (markers.length) {
@@ -523,7 +483,7 @@ async function initMap() {
         geometry: { type: "Point", coordinates: [lon, lat] }
       });
 
-    } catch (err) {
+    } catch {
       skipped++;
     }
   }
