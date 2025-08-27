@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ro">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -36,7 +36,8 @@
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
   #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
   #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
-  #lightbox .prev { left: 16px; } .#lightbox .next { right: 16px; }
+  #lightbox .prev { left: 16px; }
+  #lightbox .next { right: 16px; }
   #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
 </style>
 </head>
@@ -44,7 +45,7 @@
 <div id="wrap">
   <div id="left">
     <div id="brand">Real Romania • Cuprins</div>
-    <div id="toc" role="navigation" aria-label="Places"></div>
+    <div id="toc" role="navigation" aria-label="Locuri"></div>
     <div id="explain">
       <p>Selectează un loc din stânga sau un pin pe hartă.</p>
       <h3>&nbsp;</h3>
@@ -55,10 +56,10 @@
 
 <!-- Lightbox -->
 <div id="lightbox" aria-modal="true" role="dialog">
-  <span class="close" aria-label="Close">×</span>
-  <button class="nav prev" aria-label="Previous">‹</button>
+  <span class="close" aria-label="Închide">×</span>
+  <button class="nav prev" aria-label="Înapoi">‹</button>
   <img alt="">
-  <button class="nav next" aria-label="Next">›</button>
+  <button class="nav next" aria-label="Înainte">›</button>
   <div class="counter"></div>
 </div>
 
@@ -148,7 +149,7 @@ function renderExplain(group, idx){
   const ex = left.explain;
   ex.innerHTML = "";
 
-  // DESCRIPTION FIRST
+  // DESCRIPTION FIRST (cuprins desc preferred)
   const p = document.createElement('p');  p.textContent = it.cuprins_desc || it.blurb || '';
   const h = document.createElement('h3'); h.textContent = it.cuprins_title || it.place_title || it.title || 'Foto';
 
