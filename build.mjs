@@ -4,16 +4,71 @@ import path from "path";
 import fetch from "node-fetch";
 import crypto from "node:crypto";
 
-/* === Config from Secrets (with fallback) === */
-const DROPBOX_TOKEN = process.env.DROPBOX_TOKEN;
+/* === Config === */
+let ACCESS_TOKEN = process.env.DROPBOX_TOKEN || null;
+const DROPBOX_REFRESH_TOKEN = process.env.DROPBOX_REFRESH_TOKEN || null;
+const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY || null;
+const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET || null;
+
 const DROPBOX_SHARED_URL = process.env.DROPBOX_SHARED_URL;
-const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "AIzaSyAsT9RvYBryqFnJJpjEuHbtu1WveVMSoaI";
+const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "";
 const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1";
 
-if (!DROPBOX_TOKEN) throw new Error("Missing env DROPBOX_TOKEN");
 if (!DROPBOX_SHARED_URL) throw new Error("Missing env DROPBOX_SHARED_URL");
+if (!GMAPS_API_KEY) console.warn("Warning: GMAPS_API_KEY missing; map may fail to load");
 
-const dbx = new Dropbox({ accessToken: DROPBOX_TOKEN, fetch });
+/* === Token minting (refresh flow) === */
+async function mintAccessTokenViaRefresh() {
+  if (!(DROPBOX_REFRESH_TOKEN && DROPBOX_APP_KEY && DROPBOX_APP_SECRET)) return null;
+
+  const body = new URLSearchParams();
+  body.set("grant_type", "refresh_token");
+  body.set("refresh_token", DROPBOX_REFRESH_TOKEN);
+
+  // Prefer HTTP Basic auth per Dropbox docs
+  const basic = Buffer.from(`${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}`).toString("base64");
+  const r = await fetch("https://api.dropboxapi.com/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(()=>"");
+    throw new Error(`Failed to refresh Dropbox token (${r.status}): ${t}`);
+  }
+  const j = await r.json();
+  return j.access_token;
+}
+
+async function ensureAccessToken() {
+  if (ACCESS_TOKEN) return ACCESS_TOKEN;
+  const fresh = await mintAccessTokenViaRefresh();
+  if (!fresh) throw new Error("No Dropbox token available. Set DROPBOX_TOKEN or refresh trio (DROPBOX_REFRESH_TOKEN + DROPBOX_APP_KEY + DROPBOX_APP_SECRET).");
+  ACCESS_TOKEN = fresh;
+  return ACCESS_TOKEN;
+}
+
+/* === Dropbox client + 401 retry helper === */
+let dbx = null;
+async function initDbx() {
+  const tok = await ensureAccessToken();
+  dbx = new Dropbox({ accessToken: tok, fetch });
+}
+
+async function refreshAndReinitIfPossible() {
+  if (!(DROPBOX_REFRESH_TOKEN && DROPBOX_APP_KEY && DROPBOX_APP_SECRET)) return false;
+  const fresh = await mintAccessTokenViaRefresh();
+  ACCESS_TOKEN = fresh;
+  dbx = new Dropbox({ accessToken: ACCESS_TOKEN, fetch });
+  return true;
+}
+
+function is401(e) {
+  return e && (e.status === 401 || e?.error?.error?.[".tag"] === "expired_access_token");
+}
 
 /* === Helpers === */
 const IMAGE_EXTS = [".jpg",".jpeg",".png",".webp",".tif",".tiff",".heic",".heif"];
@@ -43,89 +98,135 @@ const guessFromFilename = (name="") => {
   return keys.length ? GAZ[keys[0]] : null;
 };
 
-/* === Dropbox === */
+/* === Dropbox ops with 401 retry === */
 async function listAll(sharedUrl){
-  const shared_link = { url: sharedUrl };
-  const files = [], queue = [""];
-  while(queue.length){
-    const folder = queue.shift();
-    let res = await dbx.filesListFolder({ path: folder, shared_link, include_media_info: true });
+  const attempt = async () => {
+    const shared_link = { url: sharedUrl };
+    const files = [], queue = [""];
+    let res = await dbx.filesListFolder({ path: "", shared_link, include_media_info: true });
     let data = res.result;
 
     for(const e of data.entries){
       if(e[".tag"]==="folder") queue.push(e.path_lower);
       else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
     }
-    while(data.has_more){
-      const more = await dbx.filesListFolderContinue({ cursor: data.cursor });
-      data = more.result;
-      for(const e of data.entries){
-        if(e[".tag"]==="folder") queue.push(e.path_lower);
-        else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
+    while(queue.length){
+      const folder = queue.shift();
+      try {
+        let r = await dbx.filesListFolder({ path: folder, shared_link, include_media_info: true });
+        let d = r.result;
+        for(const e of d.entries){
+          if(e[".tag"]==="folder") queue.push(e.path_lower);
+          else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
+        }
+        while(d.has_more){
+          const more = await dbx.filesListFolderContinue({ cursor: d.cursor });
+          d = more.result;
+          for(const e of d.entries){
+            if(e[".tag"]==="folder") queue.push(e.path_lower);
+            else if(e[".tag"]==="file" && isImage(e.name)) files.push(e);
+          }
+        }
+      } catch (err) {
+        throw err;
       }
     }
+    return files;
+  };
+
+  try {
+    return await attempt();
+  } catch (e) {
+    if (is401(e) && await refreshAndReinitIfPossible()) {
+      console.log("Refreshed Dropbox token after 401; retrying listAll...");
+      return await attempt();
+    }
+    throw e;
   }
-  return files;
 }
 
-/* Build page URL + raw ?raw=1 URL from shared link */
 async function filePageAndRaw(sharedFolderUrl, subpathLower){
-  try{
+  const attempt = async () => {
     const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
     const page = meta.result?.url || null;
     const pageUrl = page ? page.replace(/([?&])raw=1/, "$1dl=0") : null;
     const rawUrl  = page ? (()=>{ const u=new URL(page); u.searchParams.set("raw","1"); u.searchParams.delete("dl"); return u.toString(); })() : null;
     return { pageUrl, rawUrl };
-  }catch{
+  };
+  try {
+    return await attempt();
+  } catch (e) {
+    if (is401(e) && await refreshAndReinitIfPossible()) {
+      console.log("Refreshed Dropbox token after 401; retrying metadata...");
+      return await attempt();
+    }
     return { pageUrl: null, rawUrl: null };
   }
 }
 
-/* Try A: thumbnail via SHARED LINK */
 async function fetchThumbViaSharedLink(sharedFolderUrl, subpathLower){
-  const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
   const arg = {
     resource: { ".tag":"shared_link", url: sharedFolderUrl, path: subpathLower },
     format:   { ".tag":"jpeg" },
     mode:     { ".tag":"fitone_bestfit" },
     size:     { ".tag":"w1024h768" }
   };
-  const r = await fetch(api, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${DROPBOX_TOKEN}`,
-      "Dropbox-API-Arg": JSON.stringify(arg),
-      "Content-Type": "application/octet-stream"
-    },
-    body: ""
-  });
-  if(!r.ok) throw new Error(`thumb(shared_link) ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
+  const doReq = async () => {
+    const r = await fetch("https://content.dropboxapi.com/2/files/get_thumbnail_v2", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ACCESS_TOKEN}`,
+        "Dropbox-API-Arg": JSON.stringify(arg),
+        "Content-Type": "application/octet-stream"
+      },
+      body: ""
+    });
+    if (!r.ok) throw Object.assign(new Error(`thumb(shared_link) ${r.status}`), { status: r.status });
+    return Buffer.from(await r.arrayBuffer());
+  };
+  try {
+    return await doReq();
+  } catch (e) {
+    if (is401(e) && await refreshAndReinitIfPossible()) {
+      console.log("Refreshed Dropbox token after 401; retrying thumbnail(shared)...");
+      return await doReq();
+    }
+    throw e;
+  }
 }
 
-/* Try B: thumbnail via FILE ID (if token has direct access) */
 async function fetchThumbViaId(fileId){
-  const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
   const arg = {
-    resource: { ".tag":"path", "path": fileId },   // Dropbox accepts ids/paths here
+    resource: { ".tag":"path", "path": fileId },  // Dropbox accepts ids/paths here
     format:   { ".tag":"jpeg" },
     mode:     { ".tag":"fitone_bestfit" },
     size:     { ".tag":"w1024h768" }
   };
-  const r = await fetch(api, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${DROPBOX_TOKEN}`,
-      "Dropbox-API-Arg": JSON.stringify(arg),
-      "Content-Type": "application/octet-stream"
-    },
-    body: ""
-  });
-  if(!r.ok) throw new Error(`thumb(id) ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
+  const doReq = async () => {
+    const r = await fetch("https://content.dropboxapi.com/2/files/get_thumbnail_v2", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ACCESS_TOKEN}`,
+        "Dropbox-API-Arg": JSON.stringify(arg),
+        "Content-Type": "application/octet-stream"
+      },
+      body: ""
+    });
+    if (!r.ok) throw Object.assign(new Error(`thumb(id) ${r.status}`), { status: r.status });
+    return Buffer.from(await r.arrayBuffer());
+  };
+  try {
+    return await doReq();
+  } catch (e) {
+    if (is401(e) && await refreshAndReinitIfPossible()) {
+      console.log("Refreshed Dropbox token after 401; retrying thumbnail(id)...");
+      return await doReq();
+    }
+    throw e;
+  }
 }
 
-/* === HTML (single InfoWindow, pagination, smart cluster zoom, lightbox, robust image fallback) === */
+/* === HTML (single InfoWindow, pagination, smart cluster zoom, robust image fallback, lightbox prev/next) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -220,8 +321,8 @@ async function initMap() {
   const lb = document.getElementById('lightbox');
   const lbImg = lb.querySelector('img');
   const lbClose = lb.querySelector('.close');
-  const lbPrev = lb.querySelector(' .prev');
-  const lbNext = lb.querySelector(' .next');
+  const lbPrev = lb.querySelector('.prev');
+  const lbNext = lb.querySelector('.next');
   const lbCount = lb.querySelector('.counter');
   let lbState = null; // { group, index }
 
@@ -259,12 +360,9 @@ async function initMap() {
 
     function attachImgFallback(imgEl, it){
       imgEl.addEventListener('error', () => {
-        // Try toggling Dropbox param
         const alt = toggleDropboxParam(imgEl.src);
         if (alt !== imgEl.src) { imgEl.src = alt; return; }
-        // Try switching to external full image
         if (it.full_external && imgEl.src !== it.full_external) { imgEl.src = it.full_external; return; }
-        // Last resort: switch to thumb_external
         if (it.thumb_external && imgEl.src !== it.thumb_external) { imgEl.src = it.thumb_external; return; }
       }, { once:false });
     }
@@ -347,9 +445,11 @@ async function initMap() {
 </html>`;
 }
 
-
 /* === Build === */
 (async () => {
+  console.log("Ensuring Dropbox access token…");
+  await initDbx();
+
   console.log("Listing Dropbox shared folder…");
   const entries = await listAll(DROPBOX_SHARED_URL);
   console.log(`Found ${entries.length} images.`);
