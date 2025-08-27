@@ -125,7 +125,7 @@ async function fetchThumbViaId(fileId){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* === HTML (single InfoWindow, pagination, zoom cap, lightbox) === */
+/* === HTML (single InfoWindow, pagination, cluster zoom step, zoom cap, lightbox w/ prev-next) === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -135,7 +135,7 @@ function htmlTemplate({ dataUrl, apiKey }){
 <title>Photo Map • Google Maps</title>
 <style>
   html, body, #map { height: 100%; margin: 0; }
-  .gm-popup { max-width: 340px; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .gm-popup { max-width: 360px; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .gm-popup .imgwrap { position: relative; }
   .gm-popup img { width: 100%; height: auto; display: block; border-radius: 8px; }
   .gm-title { font-weight: 600; margin: 6px 0 2px 0; }
@@ -144,22 +144,31 @@ function htmlTemplate({ dataUrl, apiKey }){
   .gm-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
   .gm-count { font-size: 12px; opacity: .7; }
   /* Lightbox */
-  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; align-items: center; justify-content: center; z-index: 9999; }
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
   #lightbox .close { position: absolute; top: 12px; right: 16px; font-size: 28px; color: #fff; cursor: pointer; }
+  #lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 28px; color: #fff; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 12px; cursor: pointer; user-select: none; }
+  #lightbox .prev { left: 16px; }
+  #lightbox .next { right: 16px; }
+  #lightbox .counter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; opacity: .8; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
 <!-- Lightbox -->
-<div id="lightbox">
+<div id="lightbox" aria-modal="true" role="dialog">
   <span class="close" aria-label="Close">×</span>
+  <button class="nav prev" aria-label="Previous">‹</button>
   <img alt="">
+  <button class="nav next" aria-label="Next">›</button>
+  <div class="counter"></div>
 </div>
 
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 <script>
+const MAX_AUTO_ZOOM = 8;
+
 function groupByCoord(features) {
   const by = new Map();
   for (const f of features) {
@@ -188,14 +197,51 @@ async function initMap() {
     mapTypeControl: false
   });
 
-  const info = new google.maps.InfoWindow(); // single InfoWindow => only one open at a time
+  // Maintain exactly one InfoWindow
+  const info = new google.maps.InfoWindow();
 
-  // Lightbox helpers
+  // Lightbox state & helpers
   const lb = document.getElementById('lightbox');
   const lbImg = lb.querySelector('img');
   const lbClose = lb.querySelector('.close');
-  lb.addEventListener('click', (e)=>{ if(e.target===lb || e.target===lbClose) { lb.style.display='none'; lbImg.src=''; }});
-  document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') { lb.style.display='none'; lbImg.src=''; }});
+  const lbPrev = lb.querySelector('.prev');
+  const lbNext = lb.querySelector('.next');
+  const lbCount = lb.querySelector('.counter');
+  let lbState = null; // { group, index }
+
+  function renderLightbox() {
+    if (!lbState) return;
+    const g = lbState.group;
+    const n = g.items.length;
+    const i = ((lbState.index % n) + n) % n;
+    lbState.index = i;
+    const it = g.items[i];
+    const src = it.full_external || it.thumb_external || it.thumb;
+    lbImg.src = src || "";
+    lbCount.textContent = (n > 1) ? ( (i+1) + " / " + n ) : "";
+    lbPrev.style.display = (n > 1) ? "block" : "none";
+    lbNext.style.display = (n > 1) ? "block" : "none";
+  }
+  function openLightbox(group, index) {
+    lbState = { group, index };
+    renderLightbox();
+    lb.style.display = 'flex';
+  }
+  function closeLightbox() {
+    lb.style.display = 'none';
+    lbImg.src = '';
+    lbState = null;
+  }
+  lb.addEventListener('click', (e)=>{ if(e.target===lb || e.target===lbClose) closeLightbox(); });
+  lbPrev.addEventListener('click', (e)=>{ e.preventDefault(); if(lbState){ lbState.index--; renderLightbox(); }});
+  lbNext.addEventListener('click', (e)=>{ e.preventDefault(); if(lbState){ lbState.index++; renderLightbox(); }});
+  document.addEventListener('keydown', (e)=>{
+    if (lb.style.display === 'flex') {
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft') { e.preventDefault(); if(lbState){ lbState.index--; renderLightbox(); } }
+      if (e.key === 'ArrowRight'){ e.preventDefault(); if(lbState){ lbState.index++; renderLightbox(); } }
+    }
+  });
 
   try {
     const res = await fetch('${dataUrl}?ts=' + Date.now());
@@ -220,7 +266,7 @@ async function initMap() {
             '</div>'
           ) : '') +
           (imgSrc ? ('<div class="imgwrap">' +
-                       '<a href="#" class="imglink" data-full="'+(it.full_external||'')+'">' +
+                       '<a href="#" class="imglink" data-idx="'+i+'">' +
                          '<img loading="lazy" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
                        '</a>' +
                      '</div>') : '') +
@@ -233,7 +279,6 @@ async function initMap() {
 
       // Wire controls once DOM is ready for THIS content
       google.maps.event.addListenerOnce(info, 'domready', () => {
-        const box = document.querySelector('.gm-popup');
         const prev = document.querySelector('.gm-prev');
         const next = document.querySelector('.gm-next');
         const link = document.querySelector('.imglink');
@@ -243,8 +288,7 @@ async function initMap() {
 
         if (link) link.onclick = (e)=>{
           e.preventDefault();
-          const full = link.getAttribute('data-full');
-          if (full) { lbImg.src = full; lb.style.display = 'flex'; }
+          openLightbox(g, i);
         };
       });
     }
@@ -256,15 +300,21 @@ async function initMap() {
       markers.push(m);
     }
 
-    // Cluster with a gentle cluster-zoom
+    // Cluster with step-zoom behavior and popup closing
     new markerClusterer.MarkerClusterer({
       map,
       markers,
       onClusterClick: (ev) => {
-        const bounds = ev.cluster.bounds;
-        map.fitBounds(bounds);
-        // Cap zoom so it doesn't dive into street level
-        setTimeout(() => { if (map.getZoom() > 8) map.setZoom(8); }, 0);
+        // Close any open popup so cluster click always works
+        info.close();
+
+        // Step-zoom toward the cluster, but cap at MAX_AUTO_ZOOM
+        const current = map.getZoom() ?? 6;
+        const target = Math.min(current + 2, MAX_AUTO_ZOOM);
+
+        // Pan to cluster center; then set zoom (no aggressive street-level dive)
+        map.panTo(ev.cluster.position);
+        map.setZoom(target);
       }
     });
 
@@ -274,7 +324,7 @@ async function initMap() {
       markers.forEach(m => b.extend(m.getPosition()));
       map.fitBounds(b);
       google.maps.event.addListenerOnce(map, 'idle', () => {
-        if (map.getZoom() > 8) map.setZoom(8);
+        if (map.getZoom() > MAX_AUTO_ZOOM) map.setZoom(MAX_AUTO_ZOOM);
       });
     }
   } catch (e) {
