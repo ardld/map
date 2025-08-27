@@ -4,9 +4,9 @@ import path from "path";
 import fetch from "node-fetch";
 import crypto from "node:crypto";
 
-/* === Config from GitHub Secrets === */
+/* === Config from Secrets (with safe fallbacks) === */
 const DROPBOX_TOKEN = process.env.DROPBOX_TOKEN;
-const DROPBOX_SHARED_URL = process.env.DROPBOX_SHARED_URL; // your long ?scl/fo/... link
+const DROPBOX_SHARED_URL = process.env.DROPBOX_SHARED_URL;
 const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "AIzaSyAsT9RvYBryqFnJJpjEuHbtu1WveVMSoaI";
 const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1";
 
@@ -22,7 +22,7 @@ const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f
 const md5 = s => crypto.createHash("md5").update(s).digest("hex");
 const esc = s => String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
-// Minimal RO gazetteer [lon,lat]
+// Tiny RO gazetteer [lon,lat] — expand anytime
 const GAZ = {
   "breb":[23.9049,47.7485],"barsana":[24.0425,47.7367],"bethlen cris":[24.671,46.1932],
   "cris":[24.671,46.1932],"brateiu":[24.3826,46.1491],"bistrita":[24.5,47.133],
@@ -37,11 +37,11 @@ const GAZ = {
   "rasova":[27.9344,44.2458],"seimeni":[28.0713,44.3932],"izvoarele":[28.165,44.392],
   "topalu":[28.011,44.531],"ogra":[24.289,46.464],"haller":[24.289,46.464],"dupus":[24.2164,46.2178]
 };
-function guessFromFilename(name=""){
+const guessFromFilename = (name="") => {
   const t = norm(name);
   const keys = Object.keys(GAZ).filter(k=>t.includes(k)).sort((a,b)=>b.length-a.length);
   return keys.length ? GAZ[keys[0]] : null;
-}
+};
 async function geocodeNominatim(q){
   if(!ENABLE_NOMINATIM) return null;
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`;
@@ -52,7 +52,7 @@ async function geocodeNominatim(q){
   return null;
 }
 
-/* List all images via the shared link (recursive) */
+/* === Dropbox helpers === */
 async function listAll(sharedUrl){
   const shared_link = { url: sharedUrl };
   const files = [], queue = [""];
@@ -77,7 +77,6 @@ async function listAll(sharedUrl){
   return files;
 }
 
-/* Per-file Dropbox page URL (for click-through) */
 async function filePageUrl(sharedFolderUrl, subpathLower){
   try{
     const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
@@ -86,7 +85,6 @@ async function filePageUrl(sharedFolderUrl, subpathLower){
   }catch{ return null; }
 }
 
-/* Create JPEG thumbnail via Content API using shared link (no original download) */
 async function fetchThumbnail(sharedFolderUrl, subpathLower){
   const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
   const arg = {
@@ -102,13 +100,13 @@ async function fetchThumbnail(sharedFolderUrl, subpathLower){
       "Dropbox-API-Arg": JSON.stringify(arg),
       "Content-Type": "application/octet-stream"
     },
-    body: "" // empty per API
+    body: ""
   });
   if(!r.ok) throw new Error(`thumb ${r.status}`);
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* Build the HTML page (Google Maps + clusters) */
+/* === HTML === */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -199,7 +197,7 @@ async function initMap() {
       if (media?.location) {
         lat = media.location?.latitude ?? null;
         lon = media.location?.longitude ?? null;
-        when = media.time_taken || null;
+        when = media?.time_taken || null;
         if (lat!=null && lon!=null) { viaMedia++; source="media_info"; }
       }
 
@@ -222,15 +220,15 @@ async function initMap() {
         const buf = await fetchThumbnail(DROPBOX_SHARED_URL, f.path_lower);
         const name = "t-" + md5(f.path_lower) + ".jpg";
         await fs.writeFile(path.join("site/thumbs", name), buf);
-        thumb = "thumbs/" + name; // relative path (works on Pages)
+        thumb = "thumbs/" + name;
         thumbs++;
-      } catch (_) { /* no thumb for this file */ }
+      } catch (_) { /* no thumb */ }
 
       features.push({
         type: "Feature",
         properties: {
           title: esc(f.name),
-          taken_at: media?.metadata?.time_taken || when || null,
+          taken_at: when,
           source,
           original_page: pageUrl,
           thumb
