@@ -2,11 +2,11 @@ name: Build & Publish to gh-pages
 
 on:
   push:
-    branches: [ main, master ]   # works no matter your default branch
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
-  contents: write   # needed to push to gh-pages
+  contents: write
 
 jobs:
   build-deploy:
@@ -23,10 +23,13 @@ jobs:
 
       - name: Build site
         env:
-          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
-          DROPBOX_SHARED_URL: ${{ secrets.DROPBOX_SHARED_URL }}
-          GMAPS_API_KEY: ${{ secrets.GMAPS_API_KEY }}
-          ENABLE_NOMINATIM: "0"     # set to "1" to try filename geocoding via Nominatim
+          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }} # optional if using refresh flow
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }} # optional
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}             # optional
+          DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}       # optional
+          DROPBOX_SHARED_URL: ${{ secrets.DROPBOX_SHARED_URL }}       # required
+          GMAPS_API_KEY: ${{ secrets.GMAPS_API_KEY }}                 # required
+          ENABLE_NOMINATIM: "0"   # set to "1" to try filename-based geocoding
         run: npm run build
 
       - name: Publish site/ to gh-pages
