@@ -34,8 +34,8 @@ async function initMap() {
 
       const p = f.properties || {};
       const title = p.title || '';
-      const imgSrc = p.thumb || null;
-      const linkTo = p.original_page || null;
+      const imgSrc = p.thumb || p.thumb_external || null;   // 👈 fallback to external raw link
+      const linkTo = p.original_page || p.thumb_external || null;
 
       const html =
         '<div class="gm-popup">' +
