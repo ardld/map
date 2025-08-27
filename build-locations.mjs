@@ -68,12 +68,16 @@ async function listAll(sharedUrl){
   return files;
 }
 
-/* File page + raw URLs via shared link (no creation of new links) */
+/* File page + raw URLs via shared link (no new link creation) */
 async function getFileLinks(sharedFolderUrl, subpathLower){
-  const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
-  const page = meta.result?.url;
-  if (!page) return { pageUrl: null, rawUrl: null };
-  return { pageUrl: page.replace(/([?&])raw=1/, "$1dl=0"), rawUrl: toRaw(page) };
+  try{
+    const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
+    const page = meta.result?.url;
+    if (!page) return { pageUrl: null, rawUrl: null };
+    return { pageUrl: page.replace(/([?&])raw=1/, "$1dl=0"), rawUrl: toRaw(page) };
+  }catch{
+    return { pageUrl: null, rawUrl: null };
+  }
 }
 
 /* Thumbnails via the Content API (works with shared link) */
@@ -99,7 +103,7 @@ async function fetchThumbnail(sharedFolderUrl, subpathLower){
   return Buffer.from(ab);
 }
 
-/* Simple Leaflet page that always shows an image */
+/* HTML with CORRECT cluster script + graceful fallback */
 function htmlTemplate({ dataUrl }){
   return `<!doctype html>
 <html lang="en">
@@ -122,11 +126,15 @@ function htmlTemplate({ dataUrl }){
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.js"></script>
+<!-- ✅ correct file name -->
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 const map = L.map('map', { preferCanvas:true }).setView([45.94, 25.00], 6);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
-const clusters = L.markerClusterGroup({ disableClusteringAtZoom: 12 });
+
+// If markercluster failed to load, fallback to a simple LayerGroup
+const hasCluster = typeof L.markerClusterGroup === 'function';
+const group = hasCluster ? L.markerClusterGroup({ disableClusteringAtZoom: 12 }) : L.layerGroup();
 
 fetch('${dataUrl}?ts=' + Date.now())
   .then(r => r.json())
@@ -137,7 +145,7 @@ fetch('${dataUrl}?ts=' + Date.now())
         const p = f.properties || {};
         const imgSrc = p.thumb || p.original_raw;
         const linkTo = p.original_page || p.original_raw || p.thumb;
-        const img = imgSrc ? '<a href="'+linkTo+'" target="_blank" rel="noopener"><img loading="lazy" src="'+imgSrc+'" alt="'+(p.title||'')+'"/></a>' : '';
+        const img = imgSrc ? '<a href="'+(linkTo||'#')+'" target="_blank" rel="noopener"><img loading="lazy" src="'+imgSrc+'" alt="'+(p.title||'')+'"/></a>' : '';
         const html = '<div class="popup">'+ img +
           '<div class="title">'+(p.title||'')+'</div>' +
           (p.taken_at ? '<div class="meta">'+p.taken_at+'</div>' : '') +
@@ -145,8 +153,8 @@ fetch('${dataUrl}?ts=' + Date.now())
         layer.bindPopup(html, { maxWidth: 360 });
       }
     });
-    clusters.addLayer(markers);
-    map.addLayer(clusters);
+    group.addLayer(markers);
+    group.addTo(map);
     try { const b = markers.getBounds(); if (b.isValid()) map.fitBounds(b.pad(0.15)); } catch(e){}
   })
   .catch(err => console.error('Failed to load locations.json', err));
@@ -188,16 +196,14 @@ fetch('${dataUrl}?ts=' + Date.now())
 
       if (lat==null || lon==null){ skipped++; continue; }
 
-      // Get file links (for click-through and raw fallback)
+      // File links (for click-through / raw fallback)
       let original_raw = null, original_page = null;
-      try {
-        const links = await getFileLinks(DROPBOX_SHARED_URL, f.path_lower);
-        original_raw = links.rawUrl;   // may be null if API blocks, but usually present
-        original_page = links.pageUrl;
-        if (original_raw) raws++;
-      } catch (_) {}
+      const links = await getFileLinks(DROPBOX_SHARED_URL, f.path_lower);
+      original_raw = links.rawUrl;
+      original_page = links.pageUrl;
+      if (original_raw) raws++;
 
-      // Generate a thumbnail (guaranteed image for popup)
+      // Thumbnail from Content API (guaranteed popup image when succeeds)
       let thumb = null;
       try {
         const buf = await fetchThumbnail(DROPBOX_SHARED_URL, f.path_lower);
@@ -205,9 +211,7 @@ fetch('${dataUrl}?ts=' + Date.now())
         await fs.writeFile(path.join("public/thumbs", name), buf);
         thumb = "/thumbs/" + name;
         thumbs++;
-      } catch (e) {
-        // thumbnail failed; we'll rely on original_raw in the popup if present
-      }
+      } catch (_) { /* use raw in popup if needed */ }
 
       features.push({
         type: "Feature",
