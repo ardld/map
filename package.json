@@ -1,0 +1,18 @@
+{
+  "name": "photo-map",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node build-photo-geojson.mjs && cp -f public/index.html public/200.html || true",
+    "dev": "npx serve public -p 3000"
+  },
+  "dependencies": {
+    "@turf/bbox": "^6.5.0",
+    "@turf/bbox-clip": "^6.5.0",
+    "@turf/helpers": "^6.5.0",
+    "dropbox": "^11.0.0",
+    "exiftool-vendored": "^28.3.0",
+    "node-fetch": "^3.3.2"
+  }
+}
