@@ -32,14 +32,15 @@ function toRaw(sharedUrl) {
 
 async function ensureSharedLink(pathLower) {
   const list = await dbx.sharingListSharedLinks({ path: pathLower, direct_only: true });
-  if (list?.links?.length) return toRaw(list.links[0].url);
+  const links = list.result?.links || [];
+  if (links.length) return toRaw(links[0].url);
   const created = await dbx.sharingCreateSharedLinkWithSettings({ path: pathLower });
-  return toRaw(created.url);
+  return toRaw(created.result.url);
 }
 
 async function downloadViaSharedLink(sharedFolderUrl, subpathLower) {
   const r = await dbx.sharingGetSharedLinkFile({ url: sharedFolderUrl, path: subpathLower });
-  const buf = Buffer.from(r.fileBinary, "binary");
+  const buf = Buffer.from(r.result.fileBinary, "binary");
   return buf;
 }
 
@@ -82,13 +83,15 @@ async function listSharedTree(sharedUrl) {
 
   while (folders.length) {
     const folder = folders.shift();
-    const res = await dbx.filesListFolder({
+
+    let res = await dbx.filesListFolder({
       path: folder,
       shared_link,
       include_media_info: true
     });
+    let data = res.result;
 
-    for (const e of res.entries) {
+    for (const e of data.entries) {
       if (e[".tag"] === "folder") {
         folders.push(e.path_lower);
       } else if (e[".tag"] === "file" && isImage(e.name)) {
@@ -96,18 +99,17 @@ async function listSharedTree(sharedUrl) {
       }
     }
 
-    let cursor = res.cursor;
-    while (res.has_more) {
-      const more = await dbx.filesListFolderContinue({ cursor });
-      for (const e of more.entries) {
+    while (data.has_more) {
+      const more = await dbx.filesListFolderContinue({ cursor: data.cursor });
+      const md = more.result;
+      for (const e of md.entries) {
         if (e[".tag"] === "folder") {
           folders.push(e.path_lower);
         } else if (e[".tag"] === "file" && isImage(e.name)) {
           files.push(e);
         }
       }
-      cursor = more.cursor;
-      if (!more.has_more) break;
+      data = md;
     }
   }
 
