@@ -4,7 +4,7 @@ import path from "path";
 import fetch from "node-fetch";
 import crypto from "node:crypto";
 
-/* === Config from Secrets (with safe fallbacks) === */
+/* === Config from Secrets (with fallback) === */
 const DROPBOX_TOKEN = process.env.DROPBOX_TOKEN;
 const DROPBOX_SHARED_URL = process.env.DROPBOX_SHARED_URL;
 const GMAPS_API_KEY = process.env.GMAPS_API_KEY || "AIzaSyAsT9RvYBryqFnJJpjEuHbtu1WveVMSoaI";
@@ -22,7 +22,7 @@ const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f
 const md5 = s => crypto.createHash("md5").update(s).digest("hex");
 const esc = s => String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
-// Tiny RO gazetteer [lon,lat] — expand anytime
+/* Gazetteer [lon,lat] */
 const GAZ = {
   "breb":[23.9049,47.7485],"barsana":[24.0425,47.7367],"bethlen cris":[24.671,46.1932],
   "cris":[24.671,46.1932],"brateiu":[24.3826,46.1491],"bistrita":[24.5,47.133],
@@ -37,22 +37,14 @@ const GAZ = {
   "rasova":[27.9344,44.2458],"seimeni":[28.0713,44.3932],"izvoarele":[28.165,44.392],
   "topalu":[28.011,44.531],"ogra":[24.289,46.464],"haller":[24.289,46.464],"dupus":[24.2164,46.2178]
 };
+
 const guessFromFilename = (name="") => {
   const t = norm(name);
   const keys = Object.keys(GAZ).filter(k=>t.includes(k)).sort((a,b)=>b.length-a.length);
   return keys.length ? GAZ[keys[0]] : null;
 };
-async function geocodeNominatim(q){
-  if(!ENABLE_NOMINATIM) return null;
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`;
-  const r = await fetch(url, { headers:{ "User-Agent":"RealRomania-PhotoMap/1.0" } });
-  if(!r.ok) return null;
-  const d = await r.json();
-  if(Array.isArray(d) && d.length) return [parseFloat(d[0].lon), parseFloat(d[0].lat)];
-  return null;
-}
 
-/* === Dropbox helpers === */
+/* === Dropbox === */
 async function listAll(sharedUrl){
   const shared_link = { url: sharedUrl };
   const files = [], queue = [""];
@@ -77,15 +69,21 @@ async function listAll(sharedUrl){
   return files;
 }
 
-async function filePageUrl(sharedFolderUrl, subpathLower){
+/* Build a page URL + a raw URL from the folder shared link */
+async function filePageAndRaw(sharedFolderUrl, subpathLower){
   try{
     const meta = await dbx.sharingGetSharedLinkMetadata({ url: sharedFolderUrl, path: subpathLower });
     const page = meta.result?.url || null;
-    return page ? page.replace(/([?&])raw=1/, "$1dl=0") : null;
-  }catch{ return null; }
+    const pageUrl = page ? page.replace(/([?&])raw=1/, "$1dl=0") : null;
+    const rawUrl  = page ? (()=>{ const u=new URL(page); u.searchParams.set("raw","1"); u.searchParams.delete("dl"); return u.toString(); })() : null;
+    return { pageUrl, rawUrl };
+  }catch{
+    return { pageUrl: null, rawUrl: null };
+  }
 }
 
-async function fetchThumbnail(sharedFolderUrl, subpathLower){
+/* Try 1: thumbnail via SHARED LINK */
+async function fetchThumbViaSharedLink(sharedFolderUrl, subpathLower){
   const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
   const arg = {
     resource: { ".tag":"shared_link", url: sharedFolderUrl, path: subpathLower },
@@ -102,7 +100,30 @@ async function fetchThumbnail(sharedFolderUrl, subpathLower){
     },
     body: ""
   });
-  if(!r.ok) throw new Error(`thumb ${r.status}`);
+  if(!r.ok) throw new Error(`thumb(shared_link) ${r.status}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+/* Try 2: thumbnail via FILE ID (works when token owns/has the folder) */
+async function fetchThumbViaId(fileId){
+  const api = "https://content.dropboxapi.com/2/files/get_thumbnail_v2";
+  // Most Dropbox file IDs already include the "id:" prefix. Use as-is.
+  const arg = {
+    resource: { ".tag":"path", "path": fileId },
+    format:   { ".tag":"jpeg" },
+    mode:     { ".tag":"fitone_bestfit" },
+    size:     { ".tag":"w1024h768" }
+  };
+  const r = await fetch(api, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${DROPBOX_TOKEN}`,
+      "Dropbox-API-Arg": JSON.stringify(arg),
+      "Content-Type": "application/octet-stream"
+    },
+    body: ""
+  });
+  if(!r.ok) throw new Error(`thumb(id) ${r.status}`);
   return Buffer.from(await r.arrayBuffer());
 }
 
@@ -144,8 +165,8 @@ async function initMap() {
 
       const p = f.properties || {};
       const title = p.title || '';
-      const imgSrc = p.thumb || null;
-      const linkTo = p.original_page || null;
+      const imgSrc = p.thumb || p.thumb_external || null;   // 👈 fallback to external raw link
+      const linkTo = p.original_page || p.thumb_external || null;
 
       const html =
         '<div class="gm-popup">' +
@@ -186,13 +207,14 @@ async function initMap() {
   await fs.mkdir("site", { recursive: true });
   await fs.mkdir("site/thumbs", { recursive: true });
 
-  let viaMedia=0, viaGuess=0, viaNom=0, thumbs=0, skipped=0;
+  let viaMedia=0, viaGuess=0, viaNom=0, thumbs=0, extLinks=0, skipped=0;
   const features = [];
 
   for (const f of entries) {
     try {
       let lon=null, lat=null, when=null, source=null;
 
+      // 1) GPS from Dropbox media_info
       const media = f.media_info?.metadata;
       if (media?.location) {
         lat = media.location?.latitude ?? null;
@@ -201,28 +223,62 @@ async function initMap() {
         if (lat!=null && lon!=null) { viaMedia++; source="media_info"; }
       }
 
+      // 2) Guess from filename
       if (lat==null || lon==null) {
         const g = guessFromFilename(f.name);
         if (g){ [lon,lat]=g; viaGuess++; source = source || "filename"; }
       }
 
+      // 3) Optional Nominatim
       if ((lat==null || lon==null) && ENABLE_NOMINATIM) {
-        const gg = await geocodeNominatim(f.name.replace(/\.[^.]+$/,"").replace(/[_\-.]+/g," ").trim());
-        if (gg){ [lon,lat]=gg; viaNom++; source = source || "nominatim"; }
+        const urlName = f.name.replace(/\.[^.]+$/,"").replace(/[_\-.]+/g," ").trim();
+        try{
+          const gg = await (async ()=> {
+            const u = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(urlName)}&format=jsonv2&limit=1`;
+            const r = await fetch(u, { headers:{ "User-Agent":"RealRomania-PhotoMap/1.0" } });
+            if(!r.ok) return null;
+            const d = await r.json();
+            if(Array.isArray(d) && d.length) return [parseFloat(d[0].lon), parseFloat(d[0].lat)];
+            return null;
+          })();
+          if (gg){ [lon,lat]=gg; viaNom++; source = source || "nominatim"; }
+        }catch{}
       }
 
       if (lat==null || lon==null) { skipped++; continue; }
 
-      const pageUrl = await filePageUrl(DROPBOX_SHARED_URL, f.path_lower);
+      // Build click-through + potential external raw URL
+      const { pageUrl, rawUrl } = await filePageAndRaw(DROPBOX_SHARED_URL, f.path_lower);
 
-      let thumb = null;
+      // Try to create a local thumbnail (two strategies)
+      let thumbRel = null;
+
+      // Strategy A: shared link
       try {
-        const buf = await fetchThumbnail(DROPBOX_SHARED_URL, f.path_lower);
+        const buf = await fetchThumbViaSharedLink(DROPBOX_SHARED_URL, f.path_lower);
         const name = "t-" + md5(f.path_lower) + ".jpg";
         await fs.writeFile(path.join("site/thumbs", name), buf);
-        thumb = "thumbs/" + name;
+        thumbRel = "thumbs/" + name;
         thumbs++;
-      } catch (_) { /* no thumb */ }
+      } catch {}
+
+      // Strategy B: file id (if A failed)
+      if (!thumbRel && f.id) {
+        try {
+          const buf2 = await fetchThumbViaId(f.id);
+          const name2 = "t-" + md5(f.id) + ".jpg";
+          await fs.writeFile(path.join("site/thumbs", name2), buf2);
+          thumbRel = "thumbs/" + name2;
+          thumbs++;
+        } catch {}
+      }
+
+      // External raw fallback used directly in <img>
+      let thumbExternal = null;
+      if (!thumbRel && rawUrl) {
+        thumbExternal = rawUrl;
+        extLinks++;
+      }
 
       features.push({
         type: "Feature",
@@ -231,11 +287,13 @@ async function initMap() {
           taken_at: when,
           source,
           original_page: pageUrl,
-          thumb
+          thumb: thumbRel,              // local file under site/thumbs
+          thumb_external: thumbExternal // direct Dropbox raw URL fallback
         },
         geometry: { type: "Point", coordinates: [lon, lat] }
       });
-    } catch {
+
+    } catch (e) {
       skipped++;
     }
   }
@@ -249,6 +307,7 @@ async function initMap() {
   console.log(`  via media_info: ${viaMedia}`);
   console.log(`  via filename:   ${viaGuess}`);
   if (ENABLE_NOMINATIM) console.log(`  via Nominatim:  ${viaNom}`);
-  console.log(`  thumbnails:     ${thumbs}`);
+  console.log(`  local thumbs:   ${thumbs}`);
+  console.log(`  external imgs:  ${extLinks}`);
   console.log(`  skipped:        ${skipped}`);
 })().catch(e => { console.error(e); process.exit(1); });
