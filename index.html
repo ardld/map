@@ -38,11 +38,6 @@
   /* Map pane: fixed to 600px, never scrolls */
   #map { width: 100%; height: var(--embed-height); max-height: var(--embed-height); overflow:hidden; background:#eef3f7; position:relative; }
 
-  .gm-popup { max-width: 360px; }
-  .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:10px; }
-  .gm-title { font-weight:650; margin:6px 0 2px 0; }
-  .gm-meta { color:#6b7a88; font-size:12px; }
-
   /* Lightbox */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
@@ -58,7 +53,7 @@
   <div id="left">
     <div id="brand">Real Romania • Contents</div>
     <div id="explain">
-      <p>Select a place from the list or a pin on the map. When you pick one, you’ll see the description (first) and a thumbnail here; click the photo for a full-screen view.</p>
+      <p>Select a place from the list or a pin on the map. When you pick one, the photo appears here. Click the photo for full-screen view.</p>
       <h3>&nbsp;</h3>
     </div>
     <div id="toc" role="navigation" aria-label="Places"></div>
@@ -140,7 +135,7 @@ function groupByCoord(features) {
   });
 }
 
-let map, info;
+let map;
 let groups = [];
 let markers = [];
 let currentGroup = null;
@@ -194,31 +189,6 @@ function stepLightbox(delta){
   openLightbox(currentGroup, currentIndex);
 }
 
-function renderPopup(marker, group, idx) {
-  const n = group.items.length;
-  const i = ((idx % n) + n) % n;
-  const it = group.items[i];
-  const imgSrc = it.thumb || it.thumb_external || null;
-  const html =
-    '<div class="gm-popup" data-idx="'+i+'">' +
-      (imgSrc ? ('<div class="imgwrap">' +
-                   '<img loading="lazy" class="gm-img" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
-                 '</div>') : '') +
-      '<div class="gm-title">'+(it.cuprins_title || it.place_title || it.title || '')+'</div>' +
-      (it.taken_at ? '<div class="gm-meta">'+it.taken_at+'</div>' : '') +
-    '</div>';
-
-  info.setContent(html);
-  info.open({ anchor: marker, map });
-
-  google.maps.event.addListenerOnce(info, 'domready', () => {
-    const img  = document.querySelector('.gm-img');
-    if (img) attachImgFallback(img, it);
-  });
-
-  renderExplain(group, i);
-}
-
 function buildTOC(groups) {
   const toc = left.toc; toc.innerHTML = "";
   groups.forEach((g, idx)=>{
@@ -231,10 +201,9 @@ function buildTOC(groups) {
     item.onclick = ()=>{
       document.querySelectorAll('.toc-item').forEach(el=>el.classList.remove('active'));
       item.classList.add('active');
-      const m = markers[idx];
       map.panTo({ lat: g.lat, lng: g.lng });
       map.setZoom(Math.max(map.getZoom(), 10));
-      google.maps.event.trigger(m, 'click');
+      renderExplain(g, 0); // ← update Contents (no InfoWindow)
     };
     toc.appendChild(item);
   });
@@ -271,7 +240,6 @@ window.initMap = async function initMap() {
     streetViewControl: false,
     fullscreenControl: false
   });
-  info = new google.maps.InfoWindow();
 
   // data
   try {
@@ -279,17 +247,24 @@ window.initMap = async function initMap() {
     const geo = await res.json();
     const byCoord = groupByCoord(geo.features || []);
     const nonEmpty = byCoord.filter(g => Array.isArray(g.items) && g.items.length > 0);
-    const groupsLocal = nonEmpty;
-    window.groups = groups = groupsLocal;
+    window.groups = groups = nonEmpty;
     markers = [];
 
-    // plain markers (no cluster)
-    for (const g of groups) {
-      const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng } });
-      m.addListener('click', () => renderPopup(m, g, 0));
+    // plain markers (no cluster); on click -> update Contents only
+    groups.forEach((g, idx) => {
+      const m = new google.maps.Marker({ position: { lat: g.lat, lng: g.lng }, map });
+      m.addListener('click', () => {
+        map.panTo({ lat: g.lat, lng: g.lng });
+        map.setZoom(Math.max(map.getZoom(), 10));
+        // Update Contents panel, do NOT show InfoWindow
+        renderExplain(g, 0);
+        // also highlight the selected item in the list
+        const items = document.querySelectorAll('.toc-item');
+        items.forEach(el=>el.classList.remove('active'));
+        if (items[idx]) items[idx].classList.add('active');
+      });
       markers.push(m);
-    }
-    markers.forEach(m=>m.setMap(map));
+    });
 
     // build left list
     buildTOC(groups);
