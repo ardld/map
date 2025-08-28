@@ -1,23 +1,29 @@
-// buildi.js — builds static site into ./site
+// build.mjs — builds static site into ./site
 // - pulls Dropbox shared folder, extracts GPS (EXIF) or guesses from filename
 // - writes site/locations.json + site/thumbs/*
 // - writes site/index.html (Google Maps; centered on Romania)
 // Env vars at build-time: DROPBOX_* + GMAPS_API_KEY
+// Node: ESM (use node >=18)
 
 import { Dropbox } from "dropbox";
 import fs from "fs/promises";
 import path from "path";
 import fetch from "node-fetch";
 import crypto from "node:crypto";
+import { fileURLToPath } from "url";
+
+/* === Resolve CWD for writing files regardless of invocation path === */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /* === Config (env) === */
-const RAW_TOKEN       = process.env.DROPBOX_TOKEN;            // optional (short-lived)
-const REFRESH         = process.env.DROPBOX_REFRESH_TOKEN;     // recommended (long-lived via refresh)
-const APP_KEY         = process.env.DROPBOX_APP_KEY;
-const APP_SECRET      = process.env.DROPBOX_APP_SECRET;
-const SHARED_URL      = process.env.DROPBOX_SHARED_URL;        // REQUIRED (shared folder link)
-const GMAPS_API_KEY   = process.env.GMAPS_API_KEY || "";       // Google Maps JS key
-const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1"; // optional reverse geocode
+const RAW_TOKEN        = process.env.DROPBOX_TOKEN;              // optional (short-lived)
+const REFRESH          = process.env.DROPBOX_REFRESH_TOKEN;      // recommended (long-lived via refresh)
+const APP_KEY          = process.env.DROPBOX_APP_KEY;
+const APP_SECRET       = process.env.DROPBOX_APP_SECRET;
+const SHARED_URL       = process.env.DROPBOX_SHARED_URL;         // REQUIRED (shared folder link)
+const GMAPS_API_KEY    = process.env.GMAPS_API_KEY || "";        // Google Maps JS key
+const ENABLE_NOMINATIM = process.env.ENABLE_NOMINATIM === "1";   // optional reverse geocode
 const NOMINATIM_EMAIL  = process.env.NOMINATIM_EMAIL || "";
 const NOMI_THROTTLE    = parseInt(process.env.NOMINATIM_THROTTLE_MS || "1100", 10);
 
@@ -126,7 +132,7 @@ function titleFromFilename(name) {
 /* Load content.json overrides (root) */
 async function loadOverrides() {
   try {
-    const txt = await fs.readFile("content.json","utf8");
+    const txt = await fs.readFile(path.join(__dirname, "content.json"),"utf8");
     const arr = JSON.parse(txt);
     const byName = new Map(); // base filename (no ext), lowercased
     const patterns = [];      // [{ re: RegExp, data: {title, description}}]
@@ -227,8 +233,8 @@ async function fetchThumbViaIdOrPath(dbx, idOrPath){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* HTML template (centered on Romania) — locked to 600px total height, only left list scrolls */
-function htmlTemplate({ dataUrl, apiKey }){
+/* HTML template — fixed 600px height; only the left list scrolls; map centered on Romania */
+function htmlTemplate({ apiKey }){
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -237,15 +243,15 @@ function htmlTemplate({ dataUrl, apiKey }){
 <title>Real Romania • Photo Map</title>
 <style>
   :root {
+    --embed-height: 600px;          /* hard cap */
     --left: 380px;
     --bg:#ffffff; --panel:#f6f7f9; --text:#111; --muted:#5a6b7b; --border:#e7eaef; --accent:#2f6fed;
-    --embed-height: 600px; /* <<< fixed height */
   }
   * { box-sizing: border-box; }
-  html, body { margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  html, body { margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
   body { overflow: hidden; } /* no page scroll */
 
-  /* Layout locked at 600px total height */
+  /* Layout fixed at 600px total height */
   #wrap { display: grid; grid-template-columns: var(--left) 1fr; height: var(--embed-height); max-height: var(--embed-height); }
 
   /* Left column */
@@ -256,8 +262,8 @@ function htmlTemplate({ dataUrl, apiKey }){
   #explain p { margin: 0 0 8px 0; color: var(--muted); }
   #explain .thumb { width: 100%; border-radius:12px; margin-top:10px; display:block; border:1px solid var(--border); }
 
-  /* Only the list area scrolls, capped at 600px */
-  #toc { padding: 8px; overflow:auto; flex: 1 1 auto; max-height: calc(var(--embed-height) - 120px); } /* rough header+explain space */
+  /* Only the list area scrolls (capped by embed height) */
+  #toc { padding: 8px; overflow:auto; flex: 1 1 auto; max-height: calc(var(--embed-height) - 120px); }
 
   .toc-item { padding: 8px 10px; border-radius: 10px; cursor: pointer; display:flex; align-items:center; gap:10px; border:1px solid transparent; }
   .toc-item:hover { background:#eef3ff; border-color:#dde7ff; }
@@ -267,13 +273,10 @@ function htmlTemplate({ dataUrl, apiKey }){
   .toc-count { margin-left:auto; color:var(--muted); font-size:12px; }
 
   /* Map pane: fixed to 600px, never scrolls */
-  #map { width: 100%; height: var(--embed-height); max-height: var(--embed-height); overflow:hidden; }
+  #map { width: 100%; height: var(--embed-height); max-height: var(--embed-height); overflow:hidden; background:#eef3f7; position:relative; }
 
   .gm-popup { max-width: 360px; }
   .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:10px; }
-  .gm-pager { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
-  .gm-btn { border: 1px solid #cdd5df; background: #fff; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
-  .gm-count { font-size: 12px; color:#5a6b7b; }
   .gm-title { font-weight:650; margin:6px 0 2px 0; }
   .gm-meta { color:#6b7a88; font-size:12px; }
 
@@ -297,7 +300,7 @@ function htmlTemplate({ dataUrl, apiKey }){
     </div>
     <div id="toc" role="navigation" aria-label="Places"></div>
   </div>
-  <div id="map"></div>
+  <div id="map" aria-label="Map of Romania"></div>
 </div>
 
 <div id="lightbox" aria-modal="true" role="dialog">
@@ -310,8 +313,9 @@ function htmlTemplate({ dataUrl, apiKey }){
 
 <script>
 const DATA_URL = 'locations.json?ts=' + Date.now();
+const ROMANIA = { lat: 45.9432, lng: 24.9668 };
+const ROMANIA_ZOOM = 6;
 
-// toggle dropbox param when an image fails
 function toggleDropboxParam(u){
   try{
     const url = new URL(u);
@@ -326,7 +330,14 @@ function toggleDropboxParam(u){
   }catch{}
   return u;
 }
-
+function attachImgFallback(imgEl, it){
+  imgEl.addEventListener('error', () => {
+    const alt = toggleDropboxParam(imgEl.src);
+    if (alt !== imgEl.src) { imgEl.src = alt; return; }
+    if (it.full_external && imgEl.src !== it.full_external) { imgEl.src = it.full_external; return; }
+    if (it.thumb_external && imgEl.src !== it.thumb_external) { imgEl.src = it.thumb_external; return; }
+  });
+}
 function groupByCoord(features) {
   const by = new Map();
   for (const f of features) {
@@ -377,14 +388,6 @@ const left = {
   lightbox: null, lbImg: null, lbClose: null, lbPrev: null, lbNext: null, lbCount: null,
 };
 
-function attachImgFallback(imgEl, it){
-  imgEl.addEventListener('error', () => {
-    const alt = toggleDropboxParam(imgEl.src);
-    if (alt !== imgEl.src) { imgEl.src = alt; return; }
-    if (it.full_external && imgEl.src !== it.full_external) { imgEl.src = it.full_external; return; }
-    if (it.thumb_external && imgEl.src !== it.thumb_external) { imgEl.src = it.thumb_external; return; }
-  });
-}
 function renderExplain(group, idx){
   currentGroup = group; currentIndex = ((idx % group.items.length)+group.items.length)%group.items.length;
   const it = group.items[currentIndex];
@@ -435,17 +438,8 @@ function renderPopup(marker, group, idx) {
   const imgSrc = it.thumb || it.thumb_external || null;
   const html =
     '<div class="gm-popup" data-idx="'+i+'">' +
-      (n>1 ? (
-        '<div class="gm-pager">' +
-          '<button class="gm-btn gm-prev" aria-label="Previous">‹ Prev</button>' +
-          '<span class="gm-count">'+(i+1)+' / '+n+'</span>' +
-          '<button class="gm-btn gm-next" aria-label="Next">Next ›</button>' +
-        '</div>'
-      ) : '') +
       (imgSrc ? ('<div class="imgwrap">' +
-                   '<a href="#" class="imglink" data-idx="'+i+'">' +
-                     '<img loading="lazy" class="gm-img" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
-                   '</a>' +
+                   '<img loading="lazy" class="gm-img" src="'+imgSrc+'" alt="'+(it.title||'')+'">' +
                  '</div>') : '') +
       '<div class="gm-title">'+(it.cuprins_title || it.place_title || it.title || '')+'</div>' +
       (it.taken_at ? '<div class="gm-meta">'+it.taken_at+'</div>' : '') +
@@ -455,15 +449,8 @@ function renderPopup(marker, group, idx) {
   info.open({ anchor: marker, map });
 
   google.maps.event.addListenerOnce(info, 'domready', () => {
-    const prev = document.querySelector('.gm-prev');
-    const next = document.querySelector('.gm-next');
-    const link = document.querySelector('.imglink');
     const img  = document.querySelector('.gm-img');
-
     if (img) attachImgFallback(img, it);
-    if (prev) prev.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, group, i-1); renderExplain(group, i-1); };
-    if (next) next.onclick = (e)=>{ e.preventDefault(); renderPopup(marker, group, i+1); renderExplain(group, i+1); };
-    if (link) link.onclick = (e)=>{ e.preventDefault(); openLightbox(group, i); };
   });
 
   renderExplain(group, i);
@@ -491,7 +478,7 @@ function buildTOC(groups) {
 }
 
 window.initMap = async function initMap() {
-  // left panel & lightbox wiring
+  // wire left panel & lightbox
   left.toc = document.getElementById('toc');
   left.explain = document.getElementById('explain');
   left.lightbox = document.getElementById('lightbox');
@@ -513,10 +500,10 @@ window.initMap = async function initMap() {
     }
   });
 
-  // Google Map
+  // Google Map (center Romania, fixed zoom)
   map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 45.9432, lng: 24.9668 }, // Romania
-    zoom: 6,
+    center: ROMANIA,
+    zoom: ROMANIA_ZOOM,
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: false
@@ -525,9 +512,12 @@ window.initMap = async function initMap() {
 
   // data
   try {
-    const res = await fetch('${dataUrl}');
+    const res = await fetch(DATA_URL);
     const geo = await res.json();
-    groups = groupByCoord(geo.features || []);
+    const byCoord = groupByCoord(geo.features || []);
+    const nonEmpty = byCoord.filter(g => Array.isArray(g.items) && g.items.length > 0);
+    const groupsLocal = nonEmpty;
+    window.groups = groups = groupsLocal;
     markers = [];
 
     // plain markers (no cluster)
@@ -538,7 +528,7 @@ window.initMap = async function initMap() {
     }
     markers.forEach(m=>m.setMap(map));
 
-    // fixed center/zoom; no auto-fit
+    // build left list
     buildTOC(groups);
   } catch (e) {
     console.error('Failed to load data', e);
@@ -574,14 +564,14 @@ window.initMap = async function initMap() {
   }
 
   console.log(`Found ${entries.length} images.`);
-  await fs.mkdir("site", { recursive: true });
-  await fs.mkdir("site/thumbs", { recursive: true });
+  await fs.mkdir(path.join(__dirname, "site"), { recursive: true });
+  await fs.mkdir(path.join(__dirname, "site/thumbs"), { recursive: true });
 
   let viaMedia=0, viaGuess=0, viaNom=0, thumbs=0, extLinks=0, skipped=0;
   const features = [];
 
   // geo reverse cache between builds
-  const geocacheFile = "site/geocache.json";
+  const geocacheFile = path.join(__dirname, "site/geocache.json");
   try {
     const text = await fs.readFile(geocacheFile, "utf8");
     const obj = JSON.parse(text); for (const k of Object.keys(obj)) geoCache.set(k, obj[k]);
@@ -633,7 +623,7 @@ window.initMap = async function initMap() {
       try {
         const buf = await fetchThumbViaSharedLink(dbx, f.path_lower);
         const name = "t-" + md5(f.path_lower) + ".jpg";
-        await fs.writeFile(path.join("site/thumbs", name), buf);
+        await fs.writeFile(path.join(__dirname, "site/thumbs", name), buf);
         thumbRel = "thumbs/" + name;
         thumbs++;
       } catch {}
@@ -641,7 +631,7 @@ window.initMap = async function initMap() {
         try {
           const buf2 = await fetchThumbViaIdOrPath(dbx, f.path_lower || f.id);
           const name2 = "t-" + md5(f.id || f.path_lower) + ".jpg";
-          await fs.writeFile(path.join("site/thumbs", name2), buf2);
+          await fs.writeFile(path.join(__dirname, "site/thumbs", name2), buf2);
           thumbRel = "thumbs/" + name2;
           thumbs++;
         } catch {}
@@ -674,13 +664,13 @@ window.initMap = async function initMap() {
 
   // save geo reverse cache
   const cacheObj = {}; for (const [k,v] of geoCache.entries()) cacheObj[k]=v;
-  await fs.writeFile("site/geocache.json", JSON.stringify(cacheObj, null, 2), "utf8");
+  await fs.writeFile(geocacheFile, JSON.stringify(cacheObj, null, 2), "utf8");
 
   // outputs
   const geo = { type: "FeatureCollection", features };
-  await fs.writeFile("site/locations.json", JSON.stringify(geo, null, 2), "utf8");
-  const html = htmlTemplate({ dataUrl: "locations.json", apiKey: GMAPS_API_KEY });
-  await fs.writeFile("site/index.html", html, "utf8");
+  await fs.writeFile(path.join(__dirname, "site/locations.json"), JSON.stringify(geo, null, 2), "utf8");
+  const html = htmlTemplate({ apiKey: GMAPS_API_KEY });
+  await fs.writeFile(path.join(__dirname, "site/index.html"), html, "utf8");
 
   console.log(`Wrote ${features.length} features -> site/locations.json`);
   console.log(`  from EXIF media_info: ${viaMedia}`);
