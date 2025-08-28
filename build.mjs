@@ -227,7 +227,7 @@ async function fetchThumbViaIdOrPath(dbx, idOrPath){
   return Buffer.from(await r.arrayBuffer());
 }
 
-/* HTML template (centered on Romania) */
+/* HTML template (centered on Romania) — locked to 600px total height, only left list scrolls */
 function htmlTemplate({ dataUrl, apiKey }){
   return `<!doctype html>
 <html lang="en">
@@ -236,24 +236,39 @@ function htmlTemplate({ dataUrl, apiKey }){
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Real Romania • Photo Map</title>
 <style>
-  :root { --left: 380px; --bg:#ffffff; --panel:#f6f7f9; --text:#111; --muted:#5a6b7b; --border:#e7eaef; --accent:#2f6fed; }
+  :root {
+    --left: 380px;
+    --bg:#ffffff; --panel:#f6f7f9; --text:#111; --muted:#5a6b7b; --border:#e7eaef; --accent:#2f6fed;
+    --embed-height: 600px; /* <<< fixed height */
+  }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  #wrap { display: grid; grid-template-columns: var(--left) 1fr; height: 100%; }
-  #left { background: var(--panel); border-right: 1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
+  html, body { margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { overflow: hidden; } /* no page scroll */
+
+  /* Layout locked at 600px total height */
+  #wrap { display: grid; grid-template-columns: var(--left) 1fr; height: var(--embed-height); max-height: var(--embed-height); }
+
+  /* Left column */
+  #left { background: var(--panel); border-right: 1px solid var(--border); display:flex; flex-direction:column; min-width:0; height: var(--embed-height); max-height: var(--embed-height); }
   #brand { padding: 12px 14px; border-bottom:1px solid var(--border); font-weight:650; letter-spacing:.2px; }
   #explain { padding: 14px; border-bottom:1px solid var(--border); }
   #explain h3 { margin: 6px 0 0 0; font-size: 16px; }
   #explain p { margin: 0 0 8px 0; color: var(--muted); }
   #explain .thumb { width: 100%; border-radius:12px; margin-top:10px; display:block; border:1px solid var(--border); }
-  #toc { padding: 8px; overflow:auto; flex: 1 1 auto; }
+
+  /* Only the list area scrolls, capped at 600px */
+  #toc { padding: 8px; overflow:auto; flex: 1 1 auto; max-height: calc(var(--embed-height) - 120px); } /* rough header+explain space */
+
   .toc-item { padding: 8px 10px; border-radius: 10px; cursor: pointer; display:flex; align-items:center; gap:10px; border:1px solid transparent; }
   .toc-item:hover { background:#eef3ff; border-color:#dde7ff; }
   .toc-item.active { background:#e9efff; border-color:#d6e3ff; }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); opacity:.85; }
   .toc-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
   .toc-count { margin-left:auto; color:var(--muted); font-size:12px; }
-  #map { width: 100%; height: 100%; }
+
+  /* Map pane: fixed to 600px, never scrolls */
+  #map { width: 100%; height: var(--embed-height); max-height: var(--embed-height); overflow:hidden; }
+
   .gm-popup { max-width: 360px; }
   .gm-popup .imgwrap img { width: 100%; height:auto; display:block; border-radius:10px; }
   .gm-pager { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
@@ -261,6 +276,7 @@ function htmlTemplate({ dataUrl, apiKey }){
   .gm-count { font-size: 12px; color:#5a6b7b; }
   .gm-title { font-weight:650; margin:6px 0 2px 0; }
   .gm-meta { color:#6b7a88; font-size:12px; }
+
   /* Lightbox */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
   #lightbox img { max-width: 92vw; max-height: 90vh; display: block; }
@@ -509,7 +525,7 @@ window.initMap = async function initMap() {
 
   // data
   try {
-    const res = await fetch(DATA_URL);
+    const res = await fetch('${dataUrl}');
     const geo = await res.json();
     groups = groupByCoord(geo.features || []);
     markers = [];
